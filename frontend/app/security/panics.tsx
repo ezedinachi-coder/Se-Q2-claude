@@ -257,6 +257,7 @@ const styles = StyleSheet.create({
   panicActions: { flexDirection: 'row', marginTop: 16, gap: 12 },
   actionButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 12, borderRadius: 10 },
   mapButton: { backgroundColor: '#3B82F6' },
+  respondBtn: { backgroundColor: '#F59E0B' },
   callButton: { backgroundColor: '#10B981' },
   actionButtonText: { fontSize: 14, fontWeight: '600', color: '#fff' },
   emptyContainer: { alignItems: 'center', paddingVertical: 80 },
