@@ -359,6 +359,17 @@ export default function SecurityReports() {
           }
         />
       )}
+      
+      {/* Location Map Modal */}
+      {locationModal && (
+        <LocationMapModal
+          visible={locationModal.visible}
+          onClose={() => setLocationModal(null)}
+          latitude={locationModal.lat}
+          longitude={locationModal.lng}
+          title={locationModal.title}
+        />
+      )}
     </SafeAreaView>
   );
 }
