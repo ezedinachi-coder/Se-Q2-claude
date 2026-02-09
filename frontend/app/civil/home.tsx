@@ -171,7 +171,7 @@ export default function CivilHome() {
       <ScrollView style={styles.scrollView}>
         <View style={styles.header}>
           <View>
-            <Text style={styles.greeting}>Hello{userName ? `, ${userName}` : ''}!</Text>
+            <Text style={styles.greeting}>Hello! {userName ? userName.split(' ')[0] : 'User'}</Text>
             <Text style={styles.subGreeting}>Stay safe with SafeGuard</Text>
           </View>
           <TouchableOpacity onPress={() => router.push('/settings')}>
