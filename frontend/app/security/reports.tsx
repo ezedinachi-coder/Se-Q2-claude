@@ -400,6 +400,7 @@ const styles = StyleSheet.create({
   actionButtonActive: { backgroundColor: '#8B5CF6' },
   actionText: { fontSize: 13, color: '#94A3B8' },
   actionTextActive: { color: '#fff' },
+  respondButton: { borderWidth: 1, borderColor: '#10B98140', backgroundColor: '#10B98110' },
   emptyContainer: { alignItems: 'center', paddingVertical: 80 },
   emptyText: { fontSize: 18, color: '#64748B', marginTop: 16 },
   emptySubtext: { fontSize: 14, color: '#475569', marginTop: 4 },
