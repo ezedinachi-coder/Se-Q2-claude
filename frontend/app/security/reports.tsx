@@ -11,7 +11,7 @@ import { Video, ResizeMode } from 'expo-av';
 import { getAuthToken, clearAuthData, getUserMetadata } from '../../utils/auth';
 import { LocationMapModal } from '../../components/LocationMapModal';
 
-const BACKEND_URL = Constants.expoConfig?.extra?.backendUrl || process.env.EXPO_PUBLIC_BACKEND_URL || 'https://guardlogin.preview.emergentagent.com';
+const BACKEND_URL = Constants.expoConfig?.extra?.backendUrl || process.env.EXPO_PUBLIC_BACKEND_URL || 'https://ongoing-dev-22.preview.emergentagent.com';
 
 export default function SecurityReports() {
   const router = useRouter();

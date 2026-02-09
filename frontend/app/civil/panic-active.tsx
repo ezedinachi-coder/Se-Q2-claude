@@ -11,7 +11,7 @@ import Constants from 'expo-constants';
 import EmergencyCategoryModal from '../../components/EmergencyCategoryModal';
 import { getAuthToken, clearAuthData } from '../../utils/auth';
 
-const BACKEND_URL = Constants.expoConfig?.extra?.backendUrl || process.env.EXPO_PUBLIC_BACKEND_URL || 'https://guardlogin.preview.emergentagent.com';
+const BACKEND_URL = Constants.expoConfig?.extra?.backendUrl || process.env.EXPO_PUBLIC_BACKEND_URL || 'https://ongoing-dev-22.preview.emergentagent.com';
 const LOCATION_TASK = 'background-location-panic';
 
 // Background task - uses AsyncStorage directly (can't use SecureStore in background)
