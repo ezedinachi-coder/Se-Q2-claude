@@ -1,5 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, TextInput, Alert, ActivityIndicator, Switch, Platform, Animated, ScrollView } from 'react-native';
+import { 
+  View, Text, TouchableOpacity, StyleSheet, TextInput, Alert, 
+  ActivityIndicator, Switch, Animated, ScrollView, Dimensions,
+  Modal, KeyboardAvoidingView, Platform
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,12 +13,14 @@ import * as FileSystem from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import Constants from 'expo-constants';
+import Slider from '@react-native-community/slider';
 import { getAuthToken, clearAuthData } from '../../utils/auth';
 
-const BACKEND_URL = Constants.expoConfig?.extra?.backendUrl || process.env.EXPO_PUBLIC_BACKEND_URL || 'https://guardlogin.preview.emergentagent.com';
+const BACKEND_URL = Constants.expoConfig?.extra?.backendUrl || process.env.EXPO_PUBLIC_BACKEND_URL;
 const MIN_RECORDING_DURATION = 2;
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-export default function Report() {
+export default function VideoReport() {
   const router = useRouter();
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [isRecording, setIsRecording] = useState(false);
@@ -27,11 +33,15 @@ export default function Report() {
   const [location, setLocation] = useState<any>(null);
   const [recordingStartTime, setRecordingStartTime] = useState<number | null>(null);
   const [recordingDuration, setRecordingDuration] = useState(0);
-  const [savedDuration, setSavedDuration] = useState(0); // Store the final duration
+  const [savedDuration, setSavedDuration] = useState(0);
   const [cameraReady, setCameraReady] = useState(false);
+  const [showCaptionModal, setShowCaptionModal] = useState(false);
+  const [zoom, setZoom] = useState(0);
+  const [facing, setFacing] = useState<'back' | 'front'>('back');
+  
   const recordingPromiseRef = useRef<Promise<any> | null>(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
-  const durationRef = useRef(0); // Use ref to track duration in real-time
+  const durationRef = useRef(0);
 
   useEffect(() => {
     if (isRecording) {
@@ -46,20 +56,16 @@ export default function Report() {
     }
   }, [isRecording]);
 
-  // Duration tracking with ref for accurate final value
   useEffect(() => {
     let interval: any;
     if (isRecording && recordingStartTime) {
       interval = setInterval(() => {
         const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
         setRecordingDuration(elapsed);
-        durationRef.current = elapsed; // Keep ref in sync
+        durationRef.current = elapsed;
       }, 100);
-    } else if (!isRecording && recordingStartTime === null) {
-      // Recording stopped, save the final duration
-      if (durationRef.current > 0) {
-        setSavedDuration(durationRef.current);
-      }
+    } else if (!isRecording && recordingStartTime === null && durationRef.current > 0) {
+      setSavedDuration(durationRef.current);
     }
     return () => { if (interval) clearInterval(interval); };
   }, [isRecording, recordingStartTime]);
@@ -92,7 +98,6 @@ export default function Report() {
       return;
     }
 
-    // Reset duration tracking
     durationRef.current = 0;
     setRecordingDuration(0);
     setSavedDuration(0);
@@ -114,16 +119,14 @@ export default function Report() {
       console.log('[VideoReport] Recording finished:', video);
       
       if (video && video.uri) {
-        // Verify the file exists and has size
         const fileInfo = await FileSystem.getInfoAsync(video.uri);
         console.log('[VideoReport] File info:', fileInfo);
         
         if (fileInfo.exists && fileInfo.size && fileInfo.size > 0) {
           setRecordingUri(video.uri);
-          // Use the ref value for accurate duration
-          const finalDuration = durationRef.current;
+          const finalDuration = durationRef.current > 0 ? durationRef.current : 2;
           setSavedDuration(finalDuration);
-          Alert.alert('Video Recorded', `Recording saved (${formatDuration(finalDuration)})\nFile size: ${Math.round((fileInfo.size || 0) / 1024)}KB`);
+          setShowCaptionModal(true);
         } else {
           throw new Error('Video file is empty or invalid');
         }
@@ -133,7 +136,7 @@ export default function Report() {
     } catch (error: any) {
       console.error('[VideoReport] Recording error:', error);
       if (!error?.message?.toLowerCase().includes('stopped')) {
-        Alert.alert('Recording Error', error?.message || 'Failed to record video. Please try again.');
+        Alert.alert('Recording Error', error?.message || 'Failed to record video.');
       }
     } finally {
       setIsRecording(false);
@@ -169,13 +172,16 @@ export default function Report() {
     setCameraReady(true);
   };
 
+  const toggleFacing = () => {
+    setFacing(current => (current === 'back' ? 'front' : 'back'));
+  };
+
   const submitReport = async () => {
     if (!recordingUri) {
       Alert.alert('Error', 'Please record a video first');
       return;
     }
 
-    // Use savedDuration which is the final captured duration
     const finalDuration = savedDuration > 0 ? savedDuration : durationRef.current;
     
     if (finalDuration === 0) {
@@ -183,6 +189,7 @@ export default function Report() {
       return;
     }
 
+    setShowCaptionModal(false);
     setLoading(true);
     setUploadProgress(0);
     
@@ -202,7 +209,6 @@ export default function Report() {
         return;
       }
       
-      // Step 1: Verify video file
       setUploadProgress(10);
       const fileInfo = await FileSystem.getInfoAsync(recordingUri);
       if (!fileInfo.exists || !fileInfo.size || fileInfo.size === 0) {
@@ -211,7 +217,6 @@ export default function Report() {
       
       console.log('[VideoReport] Uploading file:', fileInfo.size, 'bytes, duration:', finalDuration);
 
-      // Step 2: Convert to base64 for upload
       setUploadProgress(20);
       const base64Video = await FileSystem.readAsStringAsync(recordingUri, {
         encoding: FileSystem.EncodingType.Base64,
@@ -221,7 +226,6 @@ export default function Report() {
         throw new Error('Failed to read video file');
       }
 
-      // Step 3: Upload to backend with file data
       setUploadProgress(40);
       
       const response = await axios.post(
@@ -266,16 +270,12 @@ export default function Report() {
         errorMessage = error.message || errorMessage;
       }
       
-      // Offer to save locally
       Alert.alert(
         'Upload Failed',
-        `${errorMessage}\n\nWould you like to save the report locally and retry later?`,
+        `${errorMessage}\n\nWould you like to save the report locally?`,
         [
           { text: 'Discard', style: 'destructive' },
-          { 
-            text: 'Save Locally', 
-            onPress: () => saveReportLocally(finalDuration)
-          }
+          { text: 'Save Locally', onPress: () => saveReportLocally(finalDuration) }
         ]
       );
     } finally {
@@ -297,7 +297,7 @@ export default function Report() {
         created_at: new Date().toISOString()
       });
       await AsyncStorage.setItem('pending_video_reports', JSON.stringify(pendingReports));
-      Alert.alert('Saved', 'Report saved locally. You can retry uploading from My Reports.', [
+      Alert.alert('Saved', 'Report saved locally. Retry from My Reports.', [
         { text: 'OK', onPress: () => router.back() }
       ]);
     } catch (error) {
@@ -330,151 +330,265 @@ export default function Report() {
     );
   }
 
+  // Full screen camera view
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#fff" />
+    <View style={styles.fullScreenContainer}>
+      {/* Camera fills the entire screen */}
+      <CameraView
+        ref={(ref) => setCameraRef(ref)}
+        style={styles.fullCamera}
+        facing={facing}
+        mode="video"
+        zoom={zoom}
+        onCameraReady={onCameraReady}
+      />
+      
+      {/* Top controls overlay */}
+      <SafeAreaView style={styles.topOverlay}>
+        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+          <Ionicons name="close" size={28} color="#fff" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Video Report</Text>
-        <View style={{ width: 24 }} />
-      </View>
-
-      <View style={styles.cameraContainer}>
-        <CameraView
-          ref={(ref) => setCameraRef(ref)}
-          style={styles.camera}
-          facing="back"
-          mode="video"
-          onCameraReady={onCameraReady}
-        />
         
-        {/* Recording indicator */}
         {isRecording && (
           <View style={styles.recordingIndicator}>
             <Animated.View style={[styles.recordingDot, { transform: [{ scale: pulseAnim }] }]} />
             <Text style={styles.recordingTime}>{formatDuration(recordingDuration)}</Text>
           </View>
         )}
-
-        {/* Recorded video info */}
-        {recordingUri && !isRecording && (
-          <View style={styles.recordedBadge}>
-            <Ionicons name="checkmark-circle" size={20} color="#10B981" />
-            <Text style={styles.recordedText}>Recorded: {formatDuration(savedDuration)}</Text>
-          </View>
-        )}
-      </View>
-
-      <ScrollView style={styles.controls}>
-        {/* Record/Stop Button */}
-        <View style={styles.recordButtonContainer}>
+        
+        <TouchableOpacity style={styles.flipButton} onPress={toggleFacing} disabled={isRecording}>
+          <Ionicons name="camera-reverse" size={28} color="#fff" />
+        </TouchableOpacity>
+      </SafeAreaView>
+      
+      {/* Zoom slider */}
+      {!isRecording && (
+        <View style={styles.zoomContainer}>
+          <Text style={styles.zoomLabel}>Zoom: {Math.round(zoom * 100)}%</Text>
+          <Slider
+            style={styles.zoomSlider}
+            minimumValue={0}
+            maximumValue={1}
+            step={0.01}
+            value={zoom}
+            onValueChange={setZoom}
+            minimumTrackTintColor="#10B981"
+            maximumTrackTintColor="#ffffff50"
+            thumbTintColor="#10B981"
+          />
+        </View>
+      )}
+      
+      {/* Recorded video badge */}
+      {recordingUri && !isRecording && (
+        <View style={styles.recordedBadge}>
+          <Ionicons name="checkmark-circle" size={20} color="#10B981" />
+          <Text style={styles.recordedText}>Recorded: {formatDuration(savedDuration)}</Text>
+        </View>
+      )}
+      
+      {/* Bottom controls */}
+      <View style={styles.bottomOverlay}>
+        <View style={styles.controlsRow}>
+          {/* Spacer */}
+          <View style={styles.sideButton} />
+          
+          {/* Main record button */}
           <TouchableOpacity
             style={[styles.recordButton, isRecording && styles.recordButtonActive]}
             onPress={isRecording ? stopRecording : startRecording}
             disabled={loading || !cameraReady}
           >
-            <Ionicons 
-              name={isRecording ? 'stop' : 'videocam'} 
-              size={36} 
-              color="#fff" 
-            />
+            <View style={[styles.recordButtonInner, isRecording && styles.recordButtonInnerActive]}>
+              {isRecording ? (
+                <Ionicons name="stop" size={32} color="#fff" />
+              ) : (
+                <View style={styles.recordButtonCircle} />
+              )}
+            </View>
           </TouchableOpacity>
-          <Text style={styles.recordButtonLabel}>
-            {!cameraReady ? 'Initializing...' : isRecording ? 'Tap to Stop' : 'Tap to Record'}
-          </Text>
+          
+          {/* Upload button (visible when video is recorded) */}
+          {recordingUri && !isRecording ? (
+            <TouchableOpacity style={styles.uploadButton} onPress={() => setShowCaptionModal(true)}>
+              <Ionicons name="cloud-upload" size={28} color="#fff" />
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.sideButton} />
+          )}
         </View>
-
-        {/* Caption */}
-        <View style={styles.inputGroup}>
-          <Text style={styles.inputLabel}>Caption (Optional)</Text>
-          <TextInput
-            style={styles.input}
-            value={caption}
-            onChangeText={setCaption}
-            placeholder="Describe the situation..."
-            placeholderTextColor="#64748B"
-            multiline
-          />
-        </View>
-
-        {/* Anonymous Toggle */}
-        <View style={styles.toggleRow}>
-          <View>
-            <Text style={styles.toggleLabel}>Submit Anonymously</Text>
-            <Text style={styles.toggleDescription}>Your identity will be hidden</Text>
-          </View>
-          <Switch
-            value={isAnonymous}
-            onValueChange={setIsAnonymous}
-            trackColor={{ false: '#334155', true: '#10B98150' }}
-            thumbColor={isAnonymous ? '#10B981' : '#94A3B8'}
-          />
-        </View>
-
-        {/* Upload Progress */}
-        {loading && (
-          <View style={styles.progressContainer}>
+        
+        <Text style={styles.instructionText}>
+          {!cameraReady ? 'Initializing camera...' : 
+           isRecording ? 'Tap stop when done' : 
+           recordingUri ? 'Tap upload to submit' : 'Tap record to start'}
+        </Text>
+      </View>
+      
+      {/* Loading overlay */}
+      {loading && (
+        <View style={styles.loadingOverlay}>
+          <View style={styles.loadingCard}>
+            <ActivityIndicator size="large" color="#10B981" />
+            <Text style={styles.loadingTitle}>Uploading Report</Text>
             <View style={styles.progressBar}>
               <View style={[styles.progressFill, { width: `${uploadProgress}%` }]} />
             </View>
-            <Text style={styles.progressText}>{uploadProgress}% Uploading...</Text>
+            <Text style={styles.progressText}>{uploadProgress}%</Text>
           </View>
-        )}
-
-        {/* Submit Button */}
-        <TouchableOpacity
-          style={[styles.submitButton, (!recordingUri || loading) && styles.submitButtonDisabled]}
-          onPress={submitReport}
-          disabled={!recordingUri || loading}
+        </View>
+      )}
+      
+      {/* Caption Modal */}
+      <Modal visible={showCaptionModal} animationType="slide" transparent>
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalOverlay}
         >
-          {loading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Add Details</Text>
+              <TouchableOpacity onPress={() => setShowCaptionModal(false)}>
+                <Ionicons name="close" size={24} color="#94A3B8" />
+              </TouchableOpacity>
+            </View>
+            
+            <Text style={styles.inputLabel}>Caption (Optional)</Text>
+            <TextInput
+              style={styles.captionInput}
+              value={caption}
+              onChangeText={setCaption}
+              placeholder="Describe the situation..."
+              placeholderTextColor="#64748B"
+              multiline
+              numberOfLines={3}
+            />
+            
+            <View style={styles.toggleRow}>
+              <View>
+                <Text style={styles.toggleLabel}>Submit Anonymously</Text>
+                <Text style={styles.toggleDescription}>Your identity will be hidden</Text>
+              </View>
+              <Switch
+                value={isAnonymous}
+                onValueChange={setIsAnonymous}
+                trackColor={{ false: '#334155', true: '#10B98150' }}
+                thumbColor={isAnonymous ? '#10B981' : '#94A3B8'}
+              />
+            </View>
+            
+            <TouchableOpacity style={styles.submitButton} onPress={submitReport}>
               <Ionicons name="cloud-upload" size={24} color="#fff" />
               <Text style={styles.submitButtonText}>Upload Report</Text>
-            </>
-          )}
-        </TouchableOpacity>
-      </ScrollView>
-    </SafeAreaView>
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0F172A' },
+  fullScreenContainer: { flex: 1, backgroundColor: '#000' },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   loadingText: { color: '#94A3B8', marginTop: 16 },
   errorContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
   errorText: { color: '#EF4444', fontSize: 18, marginTop: 16, textAlign: 'center' },
   retryButton: { marginTop: 20, backgroundColor: '#3B82F6', paddingVertical: 12, paddingHorizontal: 24, borderRadius: 8 },
   retryButtonText: { color: '#fff', fontWeight: '600' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16 },
-  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#fff' },
-  cameraContainer: { height: 300, backgroundColor: '#000', position: 'relative' },
-  camera: { flex: 1 },
-  recordingIndicator: { position: 'absolute', top: 16, left: 16, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
+  
+  fullCamera: { flex: 1, width: SCREEN_WIDTH, height: SCREEN_HEIGHT },
+  
+  topOverlay: { 
+    position: 'absolute', top: 0, left: 0, right: 0,
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: 16, paddingTop: Platform.OS === 'ios' ? 50 : 16
+  },
+  backButton: { 
+    width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center', alignItems: 'center'
+  },
+  flipButton: { 
+    width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center', alignItems: 'center'
+  },
+  recordingIndicator: { 
+    flexDirection: 'row', alignItems: 'center', 
+    backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 
+  },
   recordingDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#EF4444', marginRight: 8 },
-  recordingTime: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  recordedBadge: { position: 'absolute', bottom: 16, left: 16, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(16, 185, 129, 0.9)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, gap: 6 },
+  recordingTime: { color: '#fff', fontSize: 18, fontWeight: '600', fontVariant: ['tabular-nums'] },
+  
+  zoomContainer: { 
+    position: 'absolute', top: 120, left: 20, right: 20,
+    backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 12, padding: 12
+  },
+  zoomLabel: { color: '#fff', fontSize: 14, marginBottom: 8, textAlign: 'center' },
+  zoomSlider: { width: '100%', height: 40 },
+  
+  recordedBadge: { 
+    position: 'absolute', top: 180, alignSelf: 'center',
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: 'rgba(16, 185, 129, 0.9)', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, gap: 8
+  },
   recordedText: { color: '#fff', fontSize: 14, fontWeight: '600' },
-  controls: { flex: 1, padding: 16 },
-  recordButtonContainer: { alignItems: 'center', marginBottom: 20 },
-  recordButton: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#10B981', justifyContent: 'center', alignItems: 'center' },
-  recordButtonActive: { backgroundColor: '#EF4444' },
-  recordButtonLabel: { color: '#94A3B8', marginTop: 8 },
-  inputGroup: { marginBottom: 16 },
-  inputLabel: { color: '#94A3B8', marginBottom: 8 },
-  input: { backgroundColor: '#1E293B', borderRadius: 12, padding: 16, color: '#fff', minHeight: 80, textAlignVertical: 'top' },
-  toggleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#1E293B', padding: 16, borderRadius: 12, marginBottom: 16 },
+  
+  bottomOverlay: { 
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    paddingBottom: Platform.OS === 'ios' ? 40 : 20, paddingTop: 20,
+    backgroundColor: 'rgba(0,0,0,0.4)'
+  },
+  controlsRow: { 
+    flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center',
+    paddingHorizontal: 40
+  },
+  sideButton: { width: 60 },
+  recordButton: { 
+    width: 80, height: 80, borderRadius: 40, borderWidth: 4, borderColor: '#fff',
+    justifyContent: 'center', alignItems: 'center', backgroundColor: 'transparent'
+  },
+  recordButtonActive: { borderColor: '#EF4444' },
+  recordButtonInner: { 
+    width: 64, height: 64, borderRadius: 32, backgroundColor: '#EF4444',
+    justifyContent: 'center', alignItems: 'center'
+  },
+  recordButtonInnerActive: { backgroundColor: '#EF4444', borderRadius: 8 },
+  recordButtonCircle: { width: 24, height: 24, borderRadius: 12, backgroundColor: '#fff' },
+  uploadButton: { 
+    width: 60, height: 60, borderRadius: 30, backgroundColor: '#10B981',
+    justifyContent: 'center', alignItems: 'center'
+  },
+  instructionText: { color: '#fff', textAlign: 'center', marginTop: 16, fontSize: 14, opacity: 0.8 },
+  
+  loadingOverlay: { 
+    ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.8)',
+    justifyContent: 'center', alignItems: 'center'
+  },
+  loadingCard: { backgroundColor: '#1E293B', borderRadius: 16, padding: 32, alignItems: 'center', width: 280 },
+  loadingTitle: { color: '#fff', fontSize: 18, fontWeight: '600', marginTop: 16, marginBottom: 20 },
+  progressBar: { width: '100%', height: 8, backgroundColor: '#334155', borderRadius: 4, overflow: 'hidden' },
+  progressFill: { height: '100%', backgroundColor: '#10B981' },
+  progressText: { color: '#94A3B8', marginTop: 8 },
+  
+  modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
+  modalContent: { backgroundColor: '#1E293B', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24 },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  modalTitle: { fontSize: 20, fontWeight: '600', color: '#fff' },
+  inputLabel: { color: '#94A3B8', marginBottom: 8, fontSize: 14 },
+  captionInput: { 
+    backgroundColor: '#0F172A', borderRadius: 12, padding: 16, color: '#fff', 
+    minHeight: 100, textAlignVertical: 'top', marginBottom: 20
+  },
+  toggleRow: { 
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    backgroundColor: '#0F172A', padding: 16, borderRadius: 12, marginBottom: 20
+  },
   toggleLabel: { color: '#fff', fontWeight: '500' },
   toggleDescription: { color: '#64748B', fontSize: 12, marginTop: 2 },
-  progressContainer: { marginBottom: 16 },
-  progressBar: { height: 8, backgroundColor: '#1E293B', borderRadius: 4, overflow: 'hidden' },
-  progressFill: { height: '100%', backgroundColor: '#10B981' },
-  progressText: { color: '#94A3B8', marginTop: 8, textAlign: 'center' },
-  submitButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#3B82F6', paddingVertical: 16, borderRadius: 12 },
-  submitButtonDisabled: { backgroundColor: '#334155' },
+  submitButton: { 
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: '#10B981', paddingVertical: 16, borderRadius: 12
+  },
   submitButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
 });
