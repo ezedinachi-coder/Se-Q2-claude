@@ -9,6 +9,7 @@ import Constants from 'expo-constants';
 import { Audio } from 'expo-av';
 import { Video, ResizeMode } from 'expo-av';
 import { getAuthToken, clearAuthData, getUserMetadata } from '../../utils/auth';
+import { LocationMapModal } from '../../components/LocationMapModal';
 
 const BACKEND_URL = Constants.expoConfig?.extra?.backendUrl || process.env.EXPO_PUBLIC_BACKEND_URL || 'https://guardlogin.preview.emergentagent.com';
 
@@ -23,6 +24,7 @@ export default function SecurityReports() {
   const [playbackPosition, setPlaybackPosition] = useState(0);
   const [userRole, setUserRole] = useState<string>('security');
   const [selectedVideoUrl, setSelectedVideoUrl] = useState<string | null>(null);
+  const [locationModal, setLocationModal] = useState<{ visible: boolean; lat: number; lng: number; title: string } | null>(null);
 
   // Refresh on focus
   useFocusEffect(
