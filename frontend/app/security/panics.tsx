@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator, Alert, Linking, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -30,7 +30,7 @@ export default function SecurityPanics() {
 
   // Refresh on focus
   useFocusEffect(
-    React.useCallback(() => {
+    useCallback(() => {
       loadPanics();
     }, [])
   );

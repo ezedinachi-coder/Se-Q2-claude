@@ -24,7 +24,7 @@ export default function Escort() {
 
   // Check for active escort on every page focus
   useFocusEffect(
-    React.useCallback(() => {
+    useCallback(() => {
       checkActiveEscort();
       return () => {
         if (intervalRef.current) clearInterval(intervalRef.current);

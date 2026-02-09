@@ -28,7 +28,7 @@ export default function SecurityReports() {
 
   // Refresh on focus
   useFocusEffect(
-    React.useCallback(() => {
+    useCallback(() => {
       loadReports();
       return () => {
         // Cleanup audio on unmount

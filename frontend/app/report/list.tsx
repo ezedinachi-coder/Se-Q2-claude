@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -40,7 +40,7 @@ export default function ReportList() {
   const [selectedVideo, setSelectedVideo] = useState<string | null>(null);
 
   useFocusEffect(
-    React.useCallback(() => {
+    useCallback(() => {
       loadReports();
       loadPendingReports();
       return () => {
