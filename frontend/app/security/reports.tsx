@@ -226,11 +226,6 @@ export default function SecurityReports() {
             ) : null}
             <Text style={styles.reportDate}>{formatDate(item.created_at)}</Text>
           </View>
-          <View style={[styles.statusBadge, item.uploaded ? styles.uploadedBadge : styles.pendingBadge]}>
-            <Text style={[styles.statusText, item.uploaded ? styles.uploadedText : styles.pendingText]}>
-              {item.uploaded ? 'Uploaded' : 'Pending'}
-            </Text>
-          </View>
         </View>
 
         {item.caption && (
@@ -278,14 +273,27 @@ export default function SecurityReports() {
             style={styles.actionButton}
             onPress={() => {
               if (item.latitude && item.longitude) {
-                openInMaps(item.latitude, item.longitude);
+                setLocationModal({
+                  visible: true,
+                  lat: item.latitude,
+                  lng: item.longitude,
+                  title: `${item.type?.toUpperCase()} Report Location`
+                });
               } else {
                 Alert.alert('Location', 'Location not available for this report');
               }
             }}
           >
             <Ionicons name="location" size={20} color="#F59E0B" />
-            <Text style={styles.actionText}>Map</Text>
+            <Text style={styles.actionText}>Location</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.actionButton, styles.respondButton]}
+            onPress={() => Alert.alert('Respond', 'Response feature coming soon. You will be able to initiate contact with the reporter.')}
+          >
+            <Ionicons name="checkmark-circle" size={20} color="#10B981" />
+            <Text style={[styles.actionText, { color: '#10B981' }]}>Respond</Text>
           </TouchableOpacity>
         </View>
       </View>
