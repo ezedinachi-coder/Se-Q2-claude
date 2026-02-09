@@ -153,10 +153,24 @@ export default function SecurityPanics() {
         <View style={styles.panicActions}>
           <TouchableOpacity 
             style={[styles.actionButton, styles.mapButton]}
-            onPress={() => openInMaps(item.latitude, item.longitude, `${senderName} - Emergency`)}
+            onPress={() => setLocationModal({
+              visible: true,
+              lat: item.latitude,
+              lng: item.longitude,
+              title: `${senderName}'s Location`,
+              subtitle: categoryInfo.label
+            })}
           >
-            <Ionicons name="map" size={20} color="#fff" />
-            <Text style={styles.actionButtonText}>View on Map</Text>
+            <Ionicons name="location" size={20} color="#fff" />
+            <Text style={styles.actionButtonText}>Location</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={[styles.actionButton, styles.respondBtn]}
+            onPress={() => Alert.alert('Respond', 'Response feature coming soon. You can call the user or navigate to their location.')}
+          >
+            <Ionicons name="checkmark-circle" size={20} color="#fff" />
+            <Text style={styles.actionButtonText}>Respond</Text>
           </TouchableOpacity>
           
           {senderPhone && (
