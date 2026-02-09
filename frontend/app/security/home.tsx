@@ -201,8 +201,8 @@ export default function SecurityHome() {
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.header}>
           <View>
-            <Text style={styles.greeting}>Security Dashboard</Text>
-            <Text style={styles.appName}>SafeGuard Agency</Text>
+            <Text style={styles.greeting}>Hello, Agent {agentName}</Text>
+            <Text style={styles.appName}>Security Dashboard</Text>
           </View>
           <TouchableOpacity style={styles.settingsButton} onPress={handleLogout}>
             <Ionicons name="log-out-outline" size={24} color="#fff" />
