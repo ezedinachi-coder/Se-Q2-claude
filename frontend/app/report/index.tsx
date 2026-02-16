@@ -9,7 +9,8 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Camera, CameraView } from 'expo-camera';
 import * as Location from 'expo-location';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Network from '@react-native-community/netinfo';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import Constants from 'expo-constants';
@@ -31,17 +32,27 @@ export default function VideoReport() {
   const [cameraRef, setCameraRef] = useState<any>(null);
   const [recordingUri, setRecordingUri] = useState<string | null>(null);
   const [location, setLocation] = useState<any>(null);
+  
+  // FIX 1.1: Enhanced duration tracking with multiple mechanisms
   const [recordingStartTime, setRecordingStartTime] = useState<number | null>(null);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [savedDuration, setSavedDuration] = useState(0);
+  
   const [cameraReady, setCameraReady] = useState(false);
   const [showCaptionModal, setShowCaptionModal] = useState(false);
   const [zoom, setZoom] = useState(0);
   const [facing, setFacing] = useState<'back' | 'front'>('back');
   
+  // FIX 3.1: Network state tracking
+  const [isOnline, setIsOnline] = useState(true);
+  
   const recordingPromiseRef = useRef<Promise<any> | null>(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
+  
+  // FIX 1.1: Multiple duration tracking refs for redundancy
   const durationRef = useRef(0);
+  const actualStartTimeRef = useRef<number>(0);
+  const intervalRef = useRef<any>(null);
 
   useEffect(() => {
     if (isRecording) {
@@ -56,22 +67,37 @@ export default function VideoReport() {
     }
   }, [isRecording]);
 
+  // FIX 1.1: Enhanced duration tracking with more frequent updates
   useEffect(() => {
-    let interval: any;
     if (isRecording && recordingStartTime) {
-      interval = setInterval(() => {
+      // Update every 100ms for smooth display
+      intervalRef.current = setInterval(() => {
         const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
         setRecordingDuration(elapsed);
         durationRef.current = elapsed;
       }, 100);
-    } else if (!isRecording && recordingStartTime === null && durationRef.current > 0) {
-      setSavedDuration(durationRef.current);
+    } else {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
     }
-    return () => { if (interval) clearInterval(interval); };
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
   }, [isRecording, recordingStartTime]);
 
   useEffect(() => {
     requestPermissions();
+    
+    // FIX 3.1: Monitor network connectivity
+    const unsubscribe = Network.addEventListener(state => {
+      setIsOnline(state.isConnected ?? true);
+    });
+    
+    return () => unsubscribe();
   }, []);
 
   const requestPermissions = async () => {
@@ -82,9 +108,13 @@ export default function VideoReport() {
       
       setHasPermission(cameraStatus === 'granted' && micStatus === 'granted');
       
+      // FIX 3.2: Always get location before recording
       if (locationStatus === 'granted') {
         const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
         setLocation(loc);
+        console.log('[VideoReport] Location obtained:', loc.coords.latitude, loc.coords.longitude);
+      } else {
+        console.warn('[VideoReport] Location permission not granted');
       }
     } catch (error) {
       console.error('[VideoReport] Permission error:', error);
@@ -98,16 +128,41 @@ export default function VideoReport() {
       return;
     }
 
+    // FIX 3.2: Ensure location is available before recording
+    if (!location) {
+      try {
+        console.log('[VideoReport] Getting location before recording...');
+        const loc = await Location.getCurrentPositionAsync({ 
+          accuracy: Location.Accuracy.High,
+          timeInterval: 1000,
+          distanceInterval: 0
+        });
+        setLocation(loc);
+        console.log('[VideoReport] Location obtained:', loc.coords.latitude, loc.coords.longitude);
+      } catch (err) {
+        console.error('[VideoReport] Location error:', err);
+        Alert.alert(
+          'Location Required',
+          'Location is required for security reports. Please enable location services.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+    }
+
+    // FIX 1.1: Reset all duration tracking mechanisms
     durationRef.current = 0;
     setRecordingDuration(0);
     setSavedDuration(0);
     setRecordingUri(null);
     
+    const startTime = Date.now();
+    actualStartTimeRef.current = startTime;
     setIsRecording(true);
-    setRecordingStartTime(Date.now());
+    setRecordingStartTime(startTime);
     
     try {
-      console.log('[VideoReport] Starting recording...');
+      console.log('[VideoReport] Starting recording at', new Date(startTime).toISOString());
       recordingPromiseRef.current = cameraRef.recordAsync({ 
         maxDuration: 300, 
         quality: '720p',
@@ -116,7 +171,16 @@ export default function VideoReport() {
       
       const video = await recordingPromiseRef.current;
       
-      console.log('[VideoReport] Recording finished:', video);
+      // FIX 1.1: Calculate final duration using all available methods
+      const endTime = Date.now();
+      const calculatedDuration = Math.floor((endTime - actualStartTimeRef.current) / 1000);
+      const refDuration = durationRef.current;
+      
+      // Use the maximum of all duration calculations as a failsafe
+      const finalDuration = Math.max(calculatedDuration, refDuration, 2);
+      
+      console.log('[VideoReport] Recording finished. Calculated:', calculatedDuration, 'Ref:', refDuration, 'Final:', finalDuration);
+      console.log('[VideoReport] Video object:', video);
       
       if (video && video.uri) {
         const fileInfo = await FileSystem.getInfoAsync(video.uri);
@@ -124,9 +188,10 @@ export default function VideoReport() {
         
         if (fileInfo.exists && fileInfo.size && fileInfo.size > 0) {
           setRecordingUri(video.uri);
-          const finalDuration = durationRef.current > 0 ? durationRef.current : 2;
           setSavedDuration(finalDuration);
           setShowCaptionModal(true);
+          
+          console.log('[VideoReport] ✅ Video saved successfully. Duration:', finalDuration, 'seconds');
         } else {
           throw new Error('Video file is empty or invalid');
         }
@@ -142,6 +207,7 @@ export default function VideoReport() {
       setIsRecording(false);
       setRecordingStartTime(null);
       recordingPromiseRef.current = null;
+      actualStartTimeRef.current = 0;
     }
   };
 
@@ -182,27 +248,64 @@ export default function VideoReport() {
       return;
     }
 
-    const finalDuration = savedDuration > 0 ? savedDuration : durationRef.current;
+    // FIX 1.1: Strict duration validation
+    const finalDuration = savedDuration;
     
-    if (finalDuration === 0) {
-      Alert.alert('Error', 'Video duration could not be determined. Please re-record.');
+    if (finalDuration === 0 || finalDuration < MIN_RECORDING_DURATION) {
+      Alert.alert(
+        'Invalid Duration', 
+        `Video duration (${finalDuration}s) is invalid. Please re-record for at least ${MIN_RECORDING_DURATION} seconds.`,
+        [
+          { text: 'Re-record', onPress: () => setShowCaptionModal(false) },
+          { text: 'Cancel', style: 'cancel' }
+        ]
+      );
       return;
     }
+
+    console.log('[VideoReport] Submitting report with duration:', finalDuration);
 
     setShowCaptionModal(false);
     setLoading(true);
     setUploadProgress(0);
     
-    try {
-      let currentLocation = location;
-      if (!currentLocation) {
-        try {
-          currentLocation = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-        } catch (err) {
-          currentLocation = { coords: { latitude: 9.0820, longitude: 8.6753 } };
-        }
+    // FIX 3.2: Always ensure location is available
+    let currentLocation = location;
+    if (!currentLocation) {
+      try {
+        console.log('[VideoReport] Getting location for submit...');
+        currentLocation = await Location.getCurrentPositionAsync({ 
+          accuracy: Location.Accuracy.High,
+          timeInterval: 1000 
+        });
+        setLocation(currentLocation);
+      } catch (err) {
+        console.error('[VideoReport] Location fallback failed:', err);
+        Alert.alert(
+          'Location Required',
+          'Unable to get your location. Report cannot be submitted without location.',
+          [{ text: 'OK' }]
+        );
+        setLoading(false);
+        return;
       }
+    }
 
+    // FIX 3.1: Check if online, if not save locally
+    if (!isOnline) {
+      setLoading(false);
+      Alert.alert(
+        'Offline',
+        'You are currently offline. The report will be saved locally and uploaded when you reconnect.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Save Locally', onPress: () => saveReportLocally(currentLocation, finalDuration) }
+        ]
+      );
+      return;
+    }
+
+    try {
       const token = await getAuthToken();
       if (!token) {
         router.replace('/auth/login');
@@ -228,6 +331,7 @@ export default function VideoReport() {
 
       setUploadProgress(40);
       
+      // FIX 3.2: Include GPS coordinates in upload
       const response = await axios.post(
         `${BACKEND_URL}/api/report/upload-video`,
         {
@@ -236,7 +340,10 @@ export default function VideoReport() {
           is_anonymous: isAnonymous,
           latitude: currentLocation.coords.latitude,
           longitude: currentLocation.coords.longitude,
-          duration_seconds: finalDuration
+          duration_seconds: finalDuration,
+          // Additional metadata
+          accuracy: currentLocation.coords.accuracy,
+          timestamp: new Date().toISOString()
         },
         { 
           headers: { 
@@ -270,12 +377,13 @@ export default function VideoReport() {
         errorMessage = error.message || errorMessage;
       }
       
+      // FIX 3.1: Offer to save locally on failure
       Alert.alert(
         'Upload Failed',
-        `${errorMessage}\n\nWould you like to save the report locally?`,
+        `${errorMessage}\n\nWould you like to save the report locally to upload later?`,
         [
           { text: 'Discard', style: 'destructive' },
-          { text: 'Save Locally', onPress: () => saveReportLocally(finalDuration) }
+          { text: 'Save Locally', onPress: () => saveReportLocally(currentLocation, finalDuration) }
         ]
       );
     } finally {
@@ -283,25 +391,36 @@ export default function VideoReport() {
     }
   };
 
-  const saveReportLocally = async (duration: number) => {
+  // FIX 3.1: Enhanced local save with full metadata
+  const saveReportLocally = async (loc: any, duration: number) => {
     try {
       const pendingReports = JSON.parse(await AsyncStorage.getItem('pending_video_reports') || '[]');
-      pendingReports.push({
+      const reportData = {
         id: Date.now().toString(),
         uri: recordingUri,
         caption: caption || 'Live security report',
         is_anonymous: isAnonymous,
-        latitude: location?.coords?.latitude || 9.0820,
-        longitude: location?.coords?.longitude || 8.6753,
+        latitude: loc?.coords?.latitude || 0,
+        longitude: loc?.coords?.longitude || 0,
+        accuracy: loc?.coords?.accuracy || 0,
         duration_seconds: duration,
-        created_at: new Date().toISOString()
-      });
+        created_at: new Date().toISOString(),
+        upload_status: 'pending' // For UI indicators
+      };
+      
+      pendingReports.push(reportData);
       await AsyncStorage.setItem('pending_video_reports', JSON.stringify(pendingReports));
-      Alert.alert('Saved', 'Report saved locally. Retry from My Reports.', [
-        { text: 'OK', onPress: () => router.back() }
-      ]);
+      
+      console.log('[VideoReport] Report saved locally:', reportData);
+      
+      Alert.alert(
+        'Saved Locally', 
+        'Report saved on your device. You can upload it later from Reports when you have internet connection.',
+        [{ text: 'OK', onPress: () => router.back() }]
+      );
     } catch (error) {
-      Alert.alert('Error', 'Failed to save locally');
+      console.error('[VideoReport] Local save error:', error);
+      Alert.alert('Error', 'Failed to save report locally');
     }
   };
 
@@ -361,6 +480,24 @@ export default function VideoReport() {
         </TouchableOpacity>
       </SafeAreaView>
       
+      {/* FIX 3.1: Offline indicator */}
+      {!isOnline && (
+        <View style={styles.offlineBanner}>
+          <Ionicons name="cloud-offline" size={18} color="#F59E0B" />
+          <Text style={styles.offlineText}>Offline - Reports will be saved locally</Text>
+        </View>
+      )}
+      
+      {/* Location indicator */}
+      {location && (
+        <View style={styles.locationBadge}>
+          <Ionicons name="location" size={14} color="#10B981" />
+          <Text style={styles.locationText}>
+            GPS: {location.coords.latitude.toFixed(4)}, {location.coords.longitude.toFixed(4)}
+          </Text>
+        </View>
+      )}
+      
       {/* Zoom slider */}
       {!isRecording && (
         <View style={styles.zoomContainer}>
@@ -380,7 +517,7 @@ export default function VideoReport() {
       )}
       
       {/* Recorded video badge */}
-      {recordingUri && !isRecording && (
+      {recordingUri && !isRecording && savedDuration > 0 && (
         <View style={styles.recordedBadge}>
           <Ionicons name="checkmark-circle" size={20} color="#10B981" />
           <Text style={styles.recordedText}>Recorded: {formatDuration(savedDuration)}</Text>
@@ -409,7 +546,7 @@ export default function VideoReport() {
           </TouchableOpacity>
           
           {/* Upload button (visible when video is recorded) */}
-          {recordingUri && !isRecording ? (
+          {recordingUri && !isRecording && savedDuration > 0 ? (
             <TouchableOpacity style={styles.uploadButton} onPress={() => setShowCaptionModal(true)}>
               <Ionicons name="cloud-upload" size={28} color="#fff" />
             </TouchableOpacity>
@@ -420,8 +557,9 @@ export default function VideoReport() {
         
         <Text style={styles.instructionText}>
           {!cameraReady ? 'Initializing camera...' : 
-           isRecording ? 'Tap stop when done' : 
-           recordingUri ? 'Tap upload to submit' : 'Tap record to start'}
+           isRecording ? `Recording... ${formatDuration(recordingDuration)}` : 
+           recordingUri && savedDuration > 0 ? `Ready to upload (${formatDuration(savedDuration)})` : 
+           'Tap record to start'}
         </Text>
       </View>
       
@@ -453,6 +591,14 @@ export default function VideoReport() {
               </TouchableOpacity>
             </View>
             
+            {/* Duration display */}
+            <View style={styles.durationDisplay}>
+              <Ionicons name="time" size={20} color="#10B981" />
+              <Text style={styles.durationText}>
+                Duration: {formatDuration(savedDuration)}
+              </Text>
+            </View>
+            
             <Text style={styles.inputLabel}>Caption (Optional)</Text>
             <TextInput
               style={styles.captionInput}
@@ -479,7 +625,9 @@ export default function VideoReport() {
             
             <TouchableOpacity style={styles.submitButton} onPress={submitReport}>
               <Ionicons name="cloud-upload" size={24} color="#fff" />
-              <Text style={styles.submitButtonText}>Upload Report</Text>
+              <Text style={styles.submitButtonText}>
+                {isOnline ? 'Upload Report' : 'Save Locally'}
+              </Text>
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
@@ -519,6 +667,20 @@ const styles = StyleSheet.create({
   },
   recordingDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#EF4444', marginRight: 8 },
   recordingTime: { color: '#fff', fontSize: 18, fontWeight: '600', fontVariant: ['tabular-nums'] },
+  
+  offlineBanner: {
+    position: 'absolute', top: Platform.OS === 'ios' ? 90 : 70, alignSelf: 'center',
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: 'rgba(245, 158, 11, 0.9)', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20
+  },
+  offlineText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  
+  locationBadge: {
+    position: 'absolute', top: Platform.OS === 'ios' ? 130 : 110, alignSelf: 'center',
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: 'rgba(16, 185, 129, 0.9)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20
+  },
+  locationText: { color: '#fff', fontSize: 11, fontWeight: '600' },
   
   zoomContainer: { 
     position: 'absolute', top: 120, left: 20, right: 20,
@@ -575,6 +737,18 @@ const styles = StyleSheet.create({
   modalContent: { backgroundColor: '#1E293B', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24 },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   modalTitle: { fontSize: 20, fontWeight: '600', color: '#fff' },
+  durationDisplay: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#10B98120',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+    marginBottom: 16,
+    alignSelf: 'flex-start'
+  },
+  durationText: { fontSize: 15, fontWeight: '600', color: '#10B981' },
   inputLabel: { color: '#94A3B8', marginBottom: 8, fontSize: 14 },
   captionInput: { 
     backgroundColor: '#0F172A', borderRadius: 12, padding: 16, color: '#fff', 
