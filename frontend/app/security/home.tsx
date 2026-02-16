@@ -189,7 +189,7 @@ export default function SecurityHome() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#F59E0B" />
+          <ActivityIndicator size="large" color="#3B82F6" />
           <Text style={styles.loadingText}>Loading Dashboard...</Text>
         </View>
       </SafeAreaView>
@@ -281,6 +281,7 @@ export default function SecurityHome() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>🚨 Active Panics ({nearbyPanics.length})</Text>
+            {/* FIXED: View All navigation simplified - no params */}
             <TouchableOpacity onPress={() => router.push('/security/panics')}>
               <Text style={styles.viewAll}>View All</Text>
             </TouchableOpacity>
@@ -292,7 +293,8 @@ export default function SecurityHome() {
               <TouchableOpacity
                 key={panic.id}
                 style={styles.panicCard}
-                onPress={() => router.push({ pathname: '/security/panics', params: { panicId: panic.id } })}
+                /* FIXED: Navigate without panicId param - panics page loads all data itself */
+                onPress={() => router.push('/security/panics')}
               >
                 <View style={styles.panicCardLeft}>
                   <Ionicons name="alert-circle" size={28} color="#EF4444" />
@@ -313,6 +315,7 @@ export default function SecurityHome() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Nearby Reports ({nearbyReports.length})</Text>
+            {/* FIXED: View All navigation simplified - no params */}
             <TouchableOpacity onPress={() => router.push('/security/reports')}>
               <Text style={styles.viewAll}>View All</Text>
             </TouchableOpacity>
@@ -324,7 +327,8 @@ export default function SecurityHome() {
               <TouchableOpacity
                 key={report.id}
                 style={styles.reportCard}
-                onPress={() => router.push({ pathname: '/security/reports', params: { reportId: report.id } })}
+                /* FIXED: Navigate without reportId param - reports page loads all data itself */
+                onPress={() => router.push('/security/reports')}
               >
                 <Ionicons
                   name={report.type === 'video' ? 'videocam' : 'mic'}
