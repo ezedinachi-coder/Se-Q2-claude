@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator, Alert, Linking, Modal, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator, Alert, Linking, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from 'expo-router';
@@ -7,7 +7,6 @@ import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
 import Constants from 'expo-constants';
 import { getAuthToken, clearAuthData } from '../../utils/auth';
-import { LocationMapModal } from '../../components/LocationMapModal';
 
 const BACKEND_URL = Constants.expoConfig?.extra?.backendUrl || process.env.EXPO_PUBLIC_BACKEND_URL || 'https://ongoing-dev-22.preview.emergentagent.com';
 
@@ -22,46 +21,21 @@ const EMERGENCY_CATEGORIES: Record<string, { label: string; icon: string; color:
   other: { label: 'Other Emergency', icon: 'help-circle', color: '#64748B' },
 };
 
-interface PanicResponseModalData {
-  panicId: string;
-  userName: string;
-  userEmail: string;
-  userPhone: string | null;
-  latitude: number;
-  longitude: number;
-  category: string;
-  activatedAt: string;
-}
-
 export default function SecurityPanics() {
   const router = useRouter();
   const [panics, setPanics] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [responseModal, setResponseModal] = useState<PanicResponseModalData | null>(null);
-  const [locationUpdateInterval, setLocationUpdateInterval] = useState<any>(null);
 
-  // Refresh on focus
   useFocusEffect(
     useCallback(() => {
       loadPanics();
-      return () => {
-        // Cleanup location polling when leaving page
-        if (locationUpdateInterval) {
-          clearInterval(locationUpdateInterval);
-        }
-      };
-    }, [locationUpdateInterval])
+    }, [])
   );
 
   useEffect(() => {
     const interval = setInterval(loadPanics, 15000);
-    return () => {
-      clearInterval(interval);
-      if (locationUpdateInterval) {
-        clearInterval(locationUpdateInterval);
-      }
-    };
-  }, [locationUpdateInterval]);
+    return () => clearInterval(interval);
+  }, []);
 
   const loadPanics = async () => {
     try {
@@ -104,6 +78,17 @@ export default function SecurityPanics() {
     }
   };
 
+  const openInMaps = (latitude: number, longitude: number, label: string) => {
+    const scheme = Platform.select({ ios: 'maps:', android: 'geo:' });
+    const url = Platform.select({
+      ios: `maps:?q=${encodeURIComponent(label)}&ll=${latitude},${longitude}`,
+      android: `geo:${latitude},${longitude}?q=${latitude},${longitude}(${encodeURIComponent(label)})`
+    });
+    if (url) {
+      Linking.openURL(url);
+    }
+  };
+
   const formatDateTime = (dateString: string) => {
     const date = new Date(dateString);
     return {
@@ -116,88 +101,64 @@ export default function SecurityPanics() {
     return EMERGENCY_CATEGORIES[category] || EMERGENCY_CATEGORIES.other;
   };
 
-  // FIX 2.4: Display actual sender name instead of "Unknown"
   const getSenderName = (item: any): string => {
-    // Fallback chain: user_name → full_name → user_email → "User"
     return item.user_name || item.full_name || item.user_email || 'User';
   };
 
-  // FIX 4.1: Open response modal with in-app map and auto-updating location
-  const handleRespond = async (item: any) => {
-    const categoryInfo = getCategoryInfo(item.emergency_category);
+  const handleRespond = (item: any) => {
     const senderName = getSenderName(item);
     const senderEmail = item.user_email || 'No email';
-    const senderPhone = item.user_phone || item.phone || null;
+    const senderPhone = item.user_phone || item.phone || 'N/A';
+    const coords = `${item.latitude?.toFixed(6)}, ${item.longitude?.toFixed(6)}`;
 
-    if (!item.latitude || !item.longitude) {
-      Alert.alert('Location Error', 'User location not available');
-      return;
-    }
+    const message = `
+🚨 PANIC RESPONSE
 
-    // Set up response modal data
-    const modalData: PanicResponseModalData = {
-      panicId: item.id || item._id,
-      userName: senderName,
-      userEmail: senderEmail,
-      userPhone: senderPhone,
-      latitude: item.latitude,
-      longitude: item.longitude,
-      category: categoryInfo.label,
-      activatedAt: item.activated_at
-    };
+Name: ${senderName}
+Email: ${senderEmail}
+Phone: ${senderPhone}
+Location: ${coords}
 
-    setResponseModal(modalData);
+What would you like to do?`;
 
-    // Start polling for location updates every 2 minutes (120000ms)
-    const interval = setInterval(async () => {
-      try {
-        const token = await getAuthToken();
-        if (!token) return;
-
-        const response = await axios.get(
-          `${BACKEND_URL}/api/security/panic/${modalData.panicId}/location`,
-          {
-            headers: { Authorization: `Bearer ${token}` },
-            timeout: 10000
+    Alert.alert(
+      'Respond to Panic',
+      message,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Call', 
+          onPress: () => {
+            if (item.user_phone || item.phone) {
+              callUser(item.user_phone || item.phone);
+            } else {
+              Alert.alert('No Phone', 'Phone number not available');
+            }
           }
-        );
-
-        if (response.data?.latitude && response.data?.longitude) {
-          setResponseModal(prev => prev ? {
-            ...prev,
-            latitude: response.data.latitude,
-            longitude: response.data.longitude
-          } : null);
-          console.log('[SecurityPanics] Location updated:', response.data.latitude, response.data.longitude);
-        }
-      } catch (error) {
-        console.error('[SecurityPanics] Failed to update location:', error);
-      }
-    }, 120000); // 2 minutes
-
-    setLocationUpdateInterval(interval);
-  };
-
-  const closeResponseModal = () => {
-    if (locationUpdateInterval) {
-      clearInterval(locationUpdateInterval);
-      setLocationUpdateInterval(null);
-    }
-    setResponseModal(null);
+        },
+        { 
+          text: 'Open Map', 
+          onPress: () => {
+            if (item.latitude && item.longitude) {
+              openInMaps(item.latitude, item.longitude, `Panic: ${senderName}`);
+            } else {
+              Alert.alert('No Location', 'Location not available');
+            }
+          }
+        },
+      ]
+    );
   };
 
   const renderPanic = ({ item }: any) => {
     const categoryInfo = getCategoryInfo(item.emergency_category);
     const dateTime = formatDateTime(item.activated_at);
-    
-    // FIX 2.4: Use actual sender name
     const senderName = getSenderName(item);
     const senderEmail = item.user_email || 'No email';
     const senderPhone = item.user_phone || item.phone;
 
     return (
       <View style={styles.panicCard}>
-        {/* Emergency Type Badge */}
         <View style={[styles.categoryBadge, { backgroundColor: `${categoryInfo.color}20` }]}>
           <Ionicons name={categoryInfo.icon as any} size={18} color={categoryInfo.color} />
           <Text style={[styles.categoryText, { color: categoryInfo.color }]}>
@@ -211,7 +172,6 @@ export default function SecurityPanics() {
           </View>
           <View style={styles.panicInfo}>
             <Text style={styles.panicTitle}>🚨 ACTIVE PANIC</Text>
-            {/* FIX 2.4: Display actual sender name */}
             <Text style={styles.panicSender}>{senderName}</Text>
             <Text style={styles.panicEmail}>{senderEmail}</Text>
             {senderPhone && (
@@ -243,7 +203,6 @@ export default function SecurityPanics() {
           </View>
         </View>
 
-        {/* FIX 2.3 & 1.5: Removed Location button, stretched Respond button (yellow) */}
         <View style={styles.panicActions}>
           <TouchableOpacity 
             style={styles.respondButton}
@@ -298,110 +257,6 @@ export default function SecurityPanics() {
           }
         />
       )}
-
-      {/* FIX 4.1 & 5.2: Response Modal with In-App Map, User Details, and Communication Buttons */}
-      {responseModal && (
-        <Modal
-          visible={true}
-          animationType="slide"
-          presentationStyle="fullScreen"
-          onRequestClose={closeResponseModal}
-        >
-          <SafeAreaView style={styles.modalContainer}>
-            <View style={styles.modalHeader}>
-              <TouchableOpacity onPress={closeResponseModal}>
-                <Ionicons name="close" size={28} color="#fff" />
-              </TouchableOpacity>
-              <Text style={styles.modalTitle}>Panic Response</Text>
-              <TouchableOpacity onPress={loadPanics}>
-                <Ionicons name="refresh" size={24} color="#fff" />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView style={styles.modalContent}>
-              {/* User Details Card */}
-              <View style={styles.userDetailsCard}>
-                <View style={styles.userHeader}>
-                  <View style={styles.userIconContainer}>
-                    <Ionicons name="person" size={32} color="#EF4444" />
-                  </View>
-                  <View style={styles.userInfo}>
-                    <Text style={styles.userName}>{responseModal.userName}</Text>
-                    <Text style={styles.userCategory}>🚨 {responseModal.category}</Text>
-                  </View>
-                </View>
-
-                <View style={styles.userDetailsRow}>
-                  <Ionicons name="mail" size={18} color="#94A3B8" />
-                  <Text style={styles.userDetail}>{responseModal.userEmail}</Text>
-                </View>
-
-                {responseModal.userPhone && (
-                  <View style={styles.userDetailsRow}>
-                    <Ionicons name="call" size={18} color="#94A3B8" />
-                    <Text style={styles.userDetail}>{responseModal.userPhone}</Text>
-                  </View>
-                )}
-
-                <View style={styles.userDetailsRow}>
-                  <Ionicons name="location" size={18} color="#94A3B8" />
-                  <Text style={styles.userDetail}>
-                    {responseModal.latitude.toFixed(6)}, {responseModal.longitude.toFixed(6)}
-                  </Text>
-                </View>
-
-                <View style={styles.userDetailsRow}>
-                  <Ionicons name="time" size={18} color="#94A3B8" />
-                  <Text style={styles.userDetail}>
-                    Activated: {new Date(responseModal.activatedAt).toLocaleString()}
-                  </Text>
-                </View>
-
-                <View style={styles.autoUpdateBadge}>
-                  <Ionicons name="sync" size={14} color="#10B981" />
-                  <Text style={styles.autoUpdateText}>Auto-updating every 2 minutes</Text>
-                </View>
-              </View>
-
-              {/* In-App Map */}
-              <View style={styles.mapContainer}>
-                <Text style={styles.mapTitle}>Live Location</Text>
-                <LocationMapModal
-                  visible={true}
-                  onClose={() => {}}
-                  latitude={responseModal.latitude}
-                  longitude={responseModal.longitude}
-                  title={`${responseModal.userName}'s Location`}
-                  hideCloseButton={true}
-                />
-              </View>
-
-              {/* FIX 5.2: Communication Action Buttons */}
-              <View style={styles.communicationButtons}>
-                {responseModal.userPhone && (
-                  <>
-                    <TouchableOpacity
-                      style={styles.commButton}
-                      onPress={() => sendMessage(responseModal.userPhone!)}
-                    >
-                      <Ionicons name="chatbubble" size={22} color="#fff" />
-                      <Text style={styles.commButtonText}>Message</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={[styles.commButton, styles.callCommButton]}
-                      onPress={() => callUser(responseModal.userPhone!)}
-                    >
-                      <Ionicons name="call" size={22} color="#fff" />
-                      <Text style={styles.commButtonText}>Call</Text>
-                    </TouchableOpacity>
-                  </>
-                )}
-              </View>
-            </ScrollView>
-          </SafeAreaView>
-        </Modal>
-      )}
     </SafeAreaView>
   );
 }
@@ -427,8 +282,6 @@ const styles = StyleSheet.create({
   detailRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
   detailText: { fontSize: 14, color: '#94A3B8' },
   panicActions: { flexDirection: 'row', marginTop: 16, gap: 12 },
-  
-  // FIX 2.3: Stretched yellow/amber Respond button
   respondButton: { 
     flex: 2,
     flexDirection: 'row', 
@@ -437,10 +290,9 @@ const styles = StyleSheet.create({
     gap: 10, 
     paddingVertical: 14, 
     borderRadius: 12,
-    backgroundColor: '#F59E0B', // Yellow/Amber color
+    backgroundColor: '#F59E0B',
   },
   respondButtonText: { fontSize: 16, fontWeight: '700', color: '#fff' },
-  
   callButton: { 
     flex: 1,
     flexDirection: 'row',
@@ -452,108 +304,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#10B981'
   },
   actionButtonText: { fontSize: 14, fontWeight: '600', color: '#fff' },
-  
   emptyContainer: { alignItems: 'center', paddingVertical: 80 },
   emptyText: { fontSize: 20, color: '#64748B', marginTop: 16, fontWeight: '600' },
   emptySubtext: { fontSize: 14, color: '#475569', marginTop: 4 },
-
-  // Response Modal Styles
-  modalContainer: { flex: 1, backgroundColor: '#0F172A' },
-  modalHeader: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'center', 
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#1E293B'
-  },
-  modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#fff' },
-  modalContent: { flex: 1 },
-  
-  userDetailsCard: { 
-    backgroundColor: '#1E293B', 
-    margin: 16, 
-    padding: 20, 
-    borderRadius: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: '#EF4444'
-  },
-  userHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
-  userIconContainer: { 
-    width: 60, 
-    height: 60, 
-    borderRadius: 30, 
-    backgroundColor: '#EF444420', 
-    justifyContent: 'center', 
-    alignItems: 'center',
-    marginRight: 16
-  },
-  userInfo: { flex: 1 },
-  userName: { fontSize: 20, fontWeight: 'bold', color: '#fff', marginBottom: 4 },
-  userCategory: { fontSize: 14, color: '#EF4444', fontWeight: '600' },
-  userDetailsRow: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    gap: 12, 
-    marginBottom: 12,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    backgroundColor: '#0F172A',
-    borderRadius: 8
-  },
-  userDetail: { fontSize: 14, color: '#fff', flex: 1 },
-  autoUpdateBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    alignSelf: 'flex-start',
-    backgroundColor: '#10B98120',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    marginTop: 8
-  },
-  autoUpdateText: { fontSize: 12, color: '#10B981', fontWeight: '600' },
-  
-  mapContainer: { 
-    margin: 16,
-    marginTop: 0,
-    backgroundColor: '#1E293B',
-    borderRadius: 16,
-    overflow: 'hidden',
-    height: 400
-  },
-  mapTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-    padding: 16,
-    paddingBottom: 12,
-    backgroundColor: '#1E293B'
-  },
-  
-  communicationButtons: {
-    flexDirection: 'row',
-    gap: 12,
-    paddingHorizontal: 16,
-    paddingBottom: 32
-  },
-  commButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    paddingVertical: 16,
-    borderRadius: 12,
-    backgroundColor: '#3B82F6'
-  },
-  callCommButton: {
-    backgroundColor: '#10B981'
-  },
-  commButtonText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#fff'
-  }
 });
