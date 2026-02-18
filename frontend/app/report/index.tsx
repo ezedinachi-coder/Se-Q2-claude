@@ -32,18 +32,13 @@ export default function VideoReport() {
   const [cameraRef, setCameraRef] = useState<any>(null);
   const [recordingUri, setRecordingUri] = useState<string | null>(null);
   const [location, setLocation] = useState<any>(null);
-  
-  // FIX 1.1: Enhanced duration tracking
   const [recordingStartTime, setRecordingStartTime] = useState<number | null>(null);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [savedDuration, setSavedDuration] = useState(0);
-  
   const [cameraReady, setCameraReady] = useState(false);
   const [showCaptionModal, setShowCaptionModal] = useState(false);
   const [zoom, setZoom] = useState(0);
   const [facing, setFacing] = useState<'back' | 'front'>('back');
-  
-  // FIX 3.1: Network state tracking
   const [isOnline, setIsOnline] = useState(true);
   
   const recordingPromiseRef = useRef<Promise<any> | null>(null);
@@ -65,7 +60,6 @@ export default function VideoReport() {
     }
   }, [isRecording]);
 
-  // FIX 1.1: Enhanced duration tracking with more frequent updates
   useEffect(() => {
     if (isRecording && recordingStartTime) {
       intervalRef.current = setInterval(() => {
@@ -87,7 +81,6 @@ export default function VideoReport() {
   useEffect(() => {
     requestPermissions();
     
-    // FIX 3.1: Monitor network connectivity
     const unsubscribe = Network.addEventListener(state => {
       setIsOnline(state.isConnected ?? true);
       console.log('[VideoReport] Network state:', state.isConnected ? 'Online' : 'Offline');
@@ -106,7 +99,6 @@ export default function VideoReport() {
       console.log('[VideoReport] Permissions:', { camera: cameraStatus, mic: micStatus, location: locationStatus });
       setHasPermission(cameraStatus === 'granted' && micStatus === 'granted');
       
-      // FIX 3.2: Always get location before recording
       if (locationStatus === 'granted') {
         try {
           const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
@@ -132,7 +124,6 @@ export default function VideoReport() {
       return;
     }
 
-    // FIX 3.2: Ensure location is available
     if (!location) {
       try {
         console.log('[VideoReport] Getting location before recording...');
@@ -154,7 +145,6 @@ export default function VideoReport() {
       }
     }
 
-    // FIX 1.1: Reset all tracking
     durationRef.current = 0;
     setRecordingDuration(0);
     setSavedDuration(0);
@@ -175,7 +165,6 @@ export default function VideoReport() {
       
       const video = await recordingPromiseRef.current;
       
-      // FIX 1.1: Calculate duration using all methods
       const endTime = Date.now();
       const calculatedDuration = Math.floor((endTime - actualStartTimeRef.current) / 1000);
       const refDuration = durationRef.current;
@@ -250,7 +239,6 @@ export default function VideoReport() {
       return;
     }
 
-    // FIX 1.1: Strict validation
     const finalDuration = savedDuration;
     
     if (finalDuration === 0 || finalDuration < MIN_RECORDING_DURATION) {
@@ -271,7 +259,6 @@ export default function VideoReport() {
     setLoading(true);
     setUploadProgress(0);
     
-    // FIX 3.2: Ensure location
     let currentLocation = location;
     if (!currentLocation) {
       try {
@@ -289,7 +276,6 @@ export default function VideoReport() {
       }
     }
 
-    // FIX 3.1: Check if online
     if (!isOnline) {
       setLoading(false);
       Alert.alert(
@@ -329,7 +315,6 @@ export default function VideoReport() {
 
       setUploadProgress(40);
       
-      // FIX 3.2: Include GPS coordinates
       const response = await axios.post(
         `${BACKEND_URL}/api/report/upload-video`,
         {
@@ -375,7 +360,6 @@ export default function VideoReport() {
         errorMessage = error.message || errorMessage;
       }
       
-      // FIX 3.1: Offer local save
       Alert.alert(
         'Upload Failed',
         `${errorMessage}\n\nWould you like to save the report locally to upload later?`,
@@ -389,7 +373,6 @@ export default function VideoReport() {
     }
   };
 
-  // FIX 3.1: Enhanced local save
   const saveReportLocally = async (loc: any, duration: number) => {
     try {
       const pendingReports = JSON.parse(await AsyncStorage.getItem('pending_video_reports') || '[]');
@@ -478,7 +461,6 @@ export default function VideoReport() {
         </TouchableOpacity>
       </SafeAreaView>
       
-      {/* FIX 3.1: Offline indicator */}
       {!isOnline && (
         <View style={styles.offlineBanner}>
           <Ionicons name="cloud-offline" size={18} color="#F59E0B" />
