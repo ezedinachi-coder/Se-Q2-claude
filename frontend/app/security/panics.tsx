@@ -104,12 +104,10 @@ export default function SecurityPanics() {
     return EMERGENCY_CATEGORIES[category] || EMERGENCY_CATEGORIES.other;
   };
 
-  // FIX 2.4: Display actual sender name instead of "Unknown"
   const getSenderName = (item: any): string => {
     return item.user_name || item.full_name || item.user_email || 'User';
   };
 
-  // FIX 4.1: Open location map modal with user details
   const handleRespond = (item: any) => {
     const senderName = getSenderName(item);
     const senderEmail = item.user_email || 'No email';
@@ -120,7 +118,6 @@ export default function SecurityPanics() {
       return;
     }
 
-    // Show options
     const buttons: any[] = [
       { text: 'Cancel', style: 'cancel' }
     ];
@@ -177,7 +174,6 @@ export default function SecurityPanics() {
           </View>
           <View style={styles.panicInfo}>
             <Text style={styles.panicTitle}>🚨 ACTIVE PANIC</Text>
-            {/* FIX 2.4: Display actual sender name */}
             <Text style={styles.panicSender}>{senderName}</Text>
             <Text style={styles.panicEmail}>{senderEmail}</Text>
             {senderPhone && (
@@ -209,7 +205,6 @@ export default function SecurityPanics() {
           </View>
         </View>
 
-        {/* FIX 2.3: Stretched yellow Respond button, removed Location button */}
         <View style={styles.panicActions}>
           <TouchableOpacity 
             style={styles.respondButton}
@@ -265,7 +260,6 @@ export default function SecurityPanics() {
         />
       )}
 
-      {/* FIX 4.1: Location Map Modal */}
       {locationModal && (
         <LocationMapModal
           visible={locationModal.visible}
@@ -300,8 +294,6 @@ const styles = StyleSheet.create({
   detailRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
   detailText: { fontSize: 14, color: '#94A3B8' },
   panicActions: { flexDirection: 'row', marginTop: 16, gap: 12 },
-  
-  // FIX 2.3: Stretched yellow/amber Respond button
   respondButton: { 
     flex: 2,
     flexDirection: 'row', 
@@ -310,10 +302,9 @@ const styles = StyleSheet.create({
     gap: 10, 
     paddingVertical: 14, 
     borderRadius: 12,
-    backgroundColor: '#F59E0B', // Yellow/Amber
+    backgroundColor: '#F59E0B',
   },
   respondButtonText: { fontSize: 16, fontWeight: '700', color: '#fff' },
-  
   callButton: { 
     flex: 1,
     flexDirection: 'row',
@@ -325,7 +316,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#10B981'
   },
   actionButtonText: { fontSize: 14, fontWeight: '600', color: '#fff' },
-  
   emptyContainer: { alignItems: 'center', paddingVertical: 80 },
   emptyText: { fontSize: 20, color: '#64748B', marginTop: 16, fontWeight: '600' },
   emptySubtext: { fontSize: 14, color: '#475569', marginTop: 4 },
