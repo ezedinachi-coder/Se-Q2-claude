@@ -39,7 +39,6 @@ export default function SecurityHome() {
       return;
     }
     
-    // Verify role
     const metadata = await getUserMetadata();
     console.log('[SecurityHome] User role:', metadata.role);
     
@@ -50,7 +49,6 @@ export default function SecurityHome() {
       return;
     }
     
-    // Load agent name from profile
     await loadAgentProfile();
     await loadTeamLocation();
     await loadNearbyData();
@@ -209,7 +207,6 @@ export default function SecurityHome() {
           </TouchableOpacity>
         </View>
 
-        {/* Team Location Card */}
         {(!teamLocation || (teamLocation.latitude === 0 && teamLocation.longitude === 0)) && (
           <View style={styles.warningBanner}>
             <Ionicons name="warning" size={24} color="#F59E0B" />
@@ -219,7 +216,6 @@ export default function SecurityHome() {
           </View>
         )}
 
-        {/* Quick Actions */}
         <View style={styles.quickActions}>
           <TouchableOpacity style={styles.quickAction} onPress={() => router.push('/security/nearby')}>
             <View style={[styles.quickActionIcon, { backgroundColor: '#F59E0B20' }]}>
@@ -254,7 +250,6 @@ export default function SecurityHome() {
           <Text style={styles.cardAction}>Tap to set/update location</Text>
         </TouchableOpacity>
 
-        {/* Search User */}
         <View style={styles.searchCard}>
           <Text style={styles.sectionTitle}>Search & Track User</Text>
           <View style={styles.searchContainer}>
@@ -277,11 +272,10 @@ export default function SecurityHome() {
           </View>
         </View>
 
-        {/* Active Panics */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>🚨 Active Panics ({nearbyPanics.length})</Text>
-            {/* FIXED: View All navigation simplified - no params */}
+            {/* FIXED: Removed params */}
             <TouchableOpacity onPress={() => router.push('/security/panics')}>
               <Text style={styles.viewAll}>View All</Text>
             </TouchableOpacity>
@@ -293,7 +287,7 @@ export default function SecurityHome() {
               <TouchableOpacity
                 key={panic.id}
                 style={styles.panicCard}
-                /* FIXED: Navigate without panicId param - panics page loads all data itself */
+                {/* FIXED: Removed params that cause crash */}
                 onPress={() => router.push('/security/panics')}
               >
                 <View style={styles.panicCardLeft}>
@@ -311,11 +305,10 @@ export default function SecurityHome() {
           )}
         </View>
 
-        {/* Nearby Reports */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Nearby Reports ({nearbyReports.length})</Text>
-            {/* FIXED: View All navigation simplified - no params */}
+            {/* FIXED: Removed params */}
             <TouchableOpacity onPress={() => router.push('/security/reports')}>
               <Text style={styles.viewAll}>View All</Text>
             </TouchableOpacity>
@@ -327,7 +320,7 @@ export default function SecurityHome() {
               <TouchableOpacity
                 key={report.id}
                 style={styles.reportCard}
-                /* FIXED: Navigate without reportId param - reports page loads all data itself */
+                {/* FIXED: Removed params that cause crash */}
                 onPress={() => router.push('/security/reports')}
               >
                 <Ionicons
