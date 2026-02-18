@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
 import Constants from 'expo-constants';
 import { getAuthToken, clearAuthData } from '../../utils/auth';
+import { LocationMapModal } from '../../components/LocationMapModal';
 
 const BACKEND_URL = Constants.expoConfig?.extra?.backendUrl || process.env.EXPO_PUBLIC_BACKEND_URL || 'https://ongoing-dev-22.preview.emergentagent.com';
 
@@ -25,6 +26,7 @@ export default function SecurityPanics() {
   const router = useRouter();
   const [panics, setPanics] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [locationModal, setLocationModal] = useState<{visible: boolean; lat: number; lng: number; title: string} | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -79,13 +81,14 @@ export default function SecurityPanics() {
   };
 
   const openInMaps = (latitude: number, longitude: number, label: string) => {
-    const scheme = Platform.select({ ios: 'maps:', android: 'geo:' });
     const url = Platform.select({
       ios: `maps:?q=${encodeURIComponent(label)}&ll=${latitude},${longitude}`,
       android: `geo:${latitude},${longitude}?q=${latitude},${longitude}(${encodeURIComponent(label)})`
     });
     if (url) {
-      Linking.openURL(url);
+      Linking.openURL(url).catch(() => {
+        Alert.alert('Error', 'Could not open maps');
+      });
     }
   };
 
@@ -101,52 +104,54 @@ export default function SecurityPanics() {
     return EMERGENCY_CATEGORIES[category] || EMERGENCY_CATEGORIES.other;
   };
 
+  // FIX 2.4: Display actual sender name instead of "Unknown"
   const getSenderName = (item: any): string => {
     return item.user_name || item.full_name || item.user_email || 'User';
   };
 
+  // FIX 4.1: Open location map modal with user details
   const handleRespond = (item: any) => {
     const senderName = getSenderName(item);
     const senderEmail = item.user_email || 'No email';
-    const senderPhone = item.user_phone || item.phone || 'N/A';
-    const coords = `${item.latitude?.toFixed(6)}, ${item.longitude?.toFixed(6)}`;
+    const senderPhone = item.user_phone || item.phone;
 
-    const message = `
-🚨 PANIC RESPONSE
+    if (!item.latitude || !item.longitude) {
+      Alert.alert('Location Error', 'User location not available');
+      return;
+    }
 
-Name: ${senderName}
-Email: ${senderEmail}
-Phone: ${senderPhone}
-Location: ${coords}
+    // Show options
+    const buttons: any[] = [
+      { text: 'Cancel', style: 'cancel' }
+    ];
 
-What would you like to do?`;
+    if (senderPhone) {
+      buttons.unshift({
+        text: 'Call User',
+        onPress: () => callUser(senderPhone)
+      });
+      buttons.unshift({
+        text: 'Send Message',
+        onPress: () => sendMessage(senderPhone)
+      });
+    }
+
+    buttons.unshift({
+      text: 'View on Map',
+      onPress: () => {
+        setLocationModal({
+          visible: true,
+          lat: item.latitude,
+          lng: item.longitude,
+          title: `${senderName}'s Location`
+        });
+      }
+    });
 
     Alert.alert(
-      'Respond to Panic',
-      message,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Call', 
-          onPress: () => {
-            if (item.user_phone || item.phone) {
-              callUser(item.user_phone || item.phone);
-            } else {
-              Alert.alert('No Phone', 'Phone number not available');
-            }
-          }
-        },
-        { 
-          text: 'Open Map', 
-          onPress: () => {
-            if (item.latitude && item.longitude) {
-              openInMaps(item.latitude, item.longitude, `Panic: ${senderName}`);
-            } else {
-              Alert.alert('No Location', 'Location not available');
-            }
-          }
-        },
-      ]
+      '🚨 Respond to Panic',
+      `Name: ${senderName}\nEmail: ${senderEmail}\n${senderPhone ? `Phone: ${senderPhone}\n` : ''}Location: ${item.latitude.toFixed(4)}, ${item.longitude.toFixed(4)}`,
+      buttons
     );
   };
 
@@ -172,6 +177,7 @@ What would you like to do?`;
           </View>
           <View style={styles.panicInfo}>
             <Text style={styles.panicTitle}>🚨 ACTIVE PANIC</Text>
+            {/* FIX 2.4: Display actual sender name */}
             <Text style={styles.panicSender}>{senderName}</Text>
             <Text style={styles.panicEmail}>{senderEmail}</Text>
             {senderPhone && (
@@ -203,6 +209,7 @@ What would you like to do?`;
           </View>
         </View>
 
+        {/* FIX 2.3: Stretched yellow Respond button, removed Location button */}
         <View style={styles.panicActions}>
           <TouchableOpacity 
             style={styles.respondButton}
@@ -257,6 +264,17 @@ What would you like to do?`;
           }
         />
       )}
+
+      {/* FIX 4.1: Location Map Modal */}
+      {locationModal && (
+        <LocationMapModal
+          visible={locationModal.visible}
+          onClose={() => setLocationModal(null)}
+          latitude={locationModal.lat}
+          longitude={locationModal.lng}
+          title={locationModal.title}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -282,6 +300,8 @@ const styles = StyleSheet.create({
   detailRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
   detailText: { fontSize: 14, color: '#94A3B8' },
   panicActions: { flexDirection: 'row', marginTop: 16, gap: 12 },
+  
+  // FIX 2.3: Stretched yellow/amber Respond button
   respondButton: { 
     flex: 2,
     flexDirection: 'row', 
@@ -290,9 +310,10 @@ const styles = StyleSheet.create({
     gap: 10, 
     paddingVertical: 14, 
     borderRadius: 12,
-    backgroundColor: '#F59E0B',
+    backgroundColor: '#F59E0B', // Yellow/Amber
   },
   respondButtonText: { fontSize: 16, fontWeight: '700', color: '#fff' },
+  
   callButton: { 
     flex: 1,
     flexDirection: 'row',
@@ -304,6 +325,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#10B981'
   },
   actionButtonText: { fontSize: 14, fontWeight: '600', color: '#fff' },
+  
   emptyContainer: { alignItems: 'center', paddingVertical: 80 },
   emptyText: { fontSize: 20, color: '#64748B', marginTop: 16, fontWeight: '600' },
   emptySubtext: { fontSize: 14, color: '#475569', marginTop: 4 },
