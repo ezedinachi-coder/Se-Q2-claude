@@ -275,7 +275,6 @@ export default function SecurityHome() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>🚨 Active Panics ({nearbyPanics.length})</Text>
-            {/* FIXED: Removed params */}
             <TouchableOpacity onPress={() => router.push('/security/panics')}>
               <Text style={styles.viewAll}>View All</Text>
             </TouchableOpacity>
@@ -287,7 +286,6 @@ export default function SecurityHome() {
               <TouchableOpacity
                 key={panic.id}
                 style={styles.panicCard}
-                {/* FIXED: Removed params that cause crash */}
                 onPress={() => router.push('/security/panics')}
               >
                 <View style={styles.panicCardLeft}>
@@ -308,7 +306,6 @@ export default function SecurityHome() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Nearby Reports ({nearbyReports.length})</Text>
-            {/* FIXED: Removed params */}
             <TouchableOpacity onPress={() => router.push('/security/reports')}>
               <Text style={styles.viewAll}>View All</Text>
             </TouchableOpacity>
@@ -320,7 +317,6 @@ export default function SecurityHome() {
               <TouchableOpacity
                 key={report.id}
                 style={styles.reportCard}
-                {/* FIXED: Removed params that cause crash */}
                 onPress={() => router.push('/security/reports')}
               >
                 <Ionicons
