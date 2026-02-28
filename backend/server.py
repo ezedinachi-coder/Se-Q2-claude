@@ -930,6 +930,8 @@ async def get_nearby_panics(user = Depends(get_current_user)):
         
         result.append({
             'id': str(p['_id']),
+            'user_name': user_info.get('full_name') or user_info.get('email', 'Unknown'),
+            'full_name': user_info.get('full_name', ''),
             'user_email': user_info.get('email', 'Unknown'),
             'user_phone': user_info.get('phone', ''),
             'activated_at': p.get('activated_at'),
@@ -940,6 +942,27 @@ async def get_nearby_panics(user = Depends(get_current_user)):
         })
     
     return result
+
+@api_router.post("/security/ping-user/{user_id}")
+async def ping_user(user_id: str, user = Depends(get_current_user)):
+    """Ping a civil user to activate their location services"""
+    if user.get('role') != 'security':
+        raise HTTPException(status_code=403, detail="Security users only")
+    try:
+        target_user = await db.users.find_one({'_id': ObjectId(user_id)})
+        if not target_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        # Record ping in database
+        await db.location_pings.insert_one({
+            'target_user_id': user_id,
+            'pinged_by': str(user['_id']),
+            'pinged_at': datetime.utcnow(),
+            'status': 'pending'
+        })
+        return {'success': True, 'message': f"Ping sent to {target_user.get('full_name') or target_user.get('email')}"}
+    except Exception as e:
+        logger.error(f"Error pinging user: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.post("/security/search-user")
 async def search_user(search: UserSearch, user = Depends(get_current_user)):
