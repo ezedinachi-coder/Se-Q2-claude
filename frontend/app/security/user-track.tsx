@@ -155,8 +155,10 @@ export default function UserTrack() {
             <Ionicons name="person" size={40} color="#F59E0B" />
           </View>
           <View style={styles.userInfo}>
-            <Text style={styles.userName}>{trackData?.full_name || trackData?.email || 'Unknown User'}</Text>
-            <Text style={styles.userEmail}>{trackData?.email || ''}</Text>
+            <Text style={styles.userName}>{trackData?.full_name || trackData?.user_name || trackData?.email || 'Unknown User'}</Text>
+            {trackData?.email && trackData?.full_name && (
+              <Text style={styles.userEmail}>{trackData.email}</Text>
+            )}
             {trackData?.phone && (
               <Text style={styles.userPhone}>{trackData.phone}</Text>
             )}
@@ -188,16 +190,40 @@ export default function UserTrack() {
 
         {/* Status Card */}
         {trackData?.is_active !== undefined && (
-          <View style={[styles.statusCard, trackData.is_active ? styles.activeCard : styles.inactiveCard]}>
+          <TouchableOpacity
+            style={[styles.statusCard, trackData.is_active ? styles.activeCard : styles.inactiveCard]}
+            onPress={trackData.is_active ? undefined : async () => {
+              try {
+                const token = await getAuthToken();
+                if (!token) return;
+                await axios.post(
+                  `${BACKEND_URL}/api/security/ping-user/${userData.user_id}`,
+                  {},
+                  { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 }
+                );
+                Alert.alert('Ping Sent', 'Location ping sent to user\'s device. They will be prompted to enable location sharing.');
+              } catch (err: any) {
+                Alert.alert('Ping Failed', 'Could not reach user device. They may be offline.');
+              }
+            }}
+          >
             <Ionicons 
               name={trackData.is_active ? "radio-button-on" : "radio-button-off"} 
               size={24} 
               color={trackData.is_active ? "#10B981" : "#64748B"} 
             />
-            <Text style={[styles.statusText, { color: trackData.is_active ? "#10B981" : "#64748B" }]}>
-              {trackData.is_active ? "Tracking Active" : "Tracking Inactive"}
-            </Text>
-          </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.statusText, { color: trackData.is_active ? "#10B981" : "#64748B" }]}>
+                {trackData.is_active ? "Tracking Active" : "Tracking Inactive"}
+              </Text>
+              {!trackData.is_active && (
+                <Text style={{ fontSize: 12, color: '#3B82F6', marginTop: 2 }}>Tap to ping & activate location</Text>
+              )}
+            </View>
+            {!trackData.is_active && (
+              <Ionicons name="notifications-outline" size={20} color="#3B82F6" />
+            )}
+          </TouchableOpacity>
         )}
 
         {/* Action Buttons */}
