@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator, Alert, Linking, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator, Alert, Linking, Platform, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from 'expo-router';
@@ -27,6 +27,7 @@ export default function SecurityPanics() {
   const [panics, setPanics] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [locationModal, setLocationModal] = useState<{visible: boolean; lat: number; lng: number; title: string} | null>(null);
+  const [respondModal, setRespondModal] = useState<any>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -109,54 +110,17 @@ export default function SecurityPanics() {
   };
 
   const handleRespond = (item: any) => {
-    const senderName = getSenderName(item);
-    const senderEmail = item.user_email || 'No email';
-    const senderPhone = item.user_phone || item.phone;
-
     if (!item.latitude || !item.longitude) {
       Alert.alert('Location Error', 'User location not available');
       return;
     }
-
-    const buttons: any[] = [
-      { text: 'Cancel', style: 'cancel' }
-    ];
-
-    if (senderPhone) {
-      buttons.unshift({
-        text: 'Call User',
-        onPress: () => callUser(senderPhone)
-      });
-      buttons.unshift({
-        text: 'Send Message',
-        onPress: () => sendMessage(senderPhone)
-      });
-    }
-
-    buttons.unshift({
-      text: 'View on Map',
-      onPress: () => {
-        setLocationModal({
-          visible: true,
-          lat: item.latitude,
-          lng: item.longitude,
-          title: `${senderName}'s Location`
-        });
-      }
-    });
-
-    Alert.alert(
-      '🚨 Respond to Panic',
-      `Name: ${senderName}\nEmail: ${senderEmail}\n${senderPhone ? `Phone: ${senderPhone}\n` : ''}Location: ${item.latitude.toFixed(4)}, ${item.longitude.toFixed(4)}`,
-      buttons
-    );
+    setRespondModal(item);
   };
 
   const renderPanic = ({ item }: any) => {
     const categoryInfo = getCategoryInfo(item.emergency_category);
     const dateTime = formatDateTime(item.activated_at);
     const senderName = getSenderName(item);
-    const senderEmail = item.user_email || 'No email';
     const senderPhone = item.user_phone || item.phone;
 
     return (
@@ -175,7 +139,6 @@ export default function SecurityPanics() {
           <View style={styles.panicInfo}>
             <Text style={styles.panicTitle}>🚨 ACTIVE PANIC</Text>
             <Text style={styles.panicSender}>{senderName}</Text>
-            <Text style={styles.panicEmail}>{senderEmail}</Text>
             {senderPhone && (
               <Text style={styles.panicPhone}>📞 {senderPhone}</Text>
             )}
@@ -213,16 +176,6 @@ export default function SecurityPanics() {
             <Ionicons name="navigate" size={22} color="#fff" />
             <Text style={styles.respondButtonText}>Respond</Text>
           </TouchableOpacity>
-          
-          {senderPhone && (
-            <TouchableOpacity 
-              style={styles.callButton}
-              onPress={() => callUser(senderPhone)}
-            >
-              <Ionicons name="call" size={20} color="#fff" />
-              <Text style={styles.actionButtonText}>Call</Text>
-            </TouchableOpacity>
-          )}
         </View>
       </View>
     );
@@ -269,6 +222,49 @@ export default function SecurityPanics() {
           title={locationModal.title}
         />
       )}
+
+      {/* Respond Modal */}
+      {respondModal && (
+        <Modal visible={true} transparent animationType="fade" onRequestClose={() => setRespondModal(null)}>
+          <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setRespondModal(null)}>
+            <View style={styles.respondModalContainer}>
+              <Text style={styles.respondModalTitle}>🚨 Respond to Panic</Text>
+              <Text style={styles.respondModalName}>{getSenderName(respondModal)}</Text>
+              {(respondModal.user_phone || respondModal.phone) && (
+                <Text style={styles.respondModalPhone}>📞 {respondModal.user_phone || respondModal.phone}</Text>
+              )}
+              <Text style={styles.respondModalCoords}>
+                📍 {respondModal.latitude?.toFixed(4)}, {respondModal.longitude?.toFixed(4)}
+              </Text>
+              
+              <TouchableOpacity style={styles.respondModalBtn} onPress={() => {
+                setRespondModal(null);
+                setLocationModal({ visible: true, lat: respondModal.latitude, lng: respondModal.longitude, title: `${getSenderName(respondModal)}'s Location` });
+              }}>
+                <Ionicons name="map" size={20} color="#fff" />
+                <Text style={styles.respondModalBtnText}>View on Map</Text>
+              </TouchableOpacity>
+
+              {(respondModal.user_phone || respondModal.phone) && (
+                <>
+                  <TouchableOpacity style={[styles.respondModalBtn, { backgroundColor: '#10B981' }]} onPress={() => { setRespondModal(null); callUser(respondModal.user_phone || respondModal.phone); }}>
+                    <Ionicons name="call" size={20} color="#fff" />
+                    <Text style={styles.respondModalBtnText}>Call User</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.respondModalBtn, { backgroundColor: '#8B5CF6' }]} onPress={() => { setRespondModal(null); sendMessage(respondModal.user_phone || respondModal.phone); }}>
+                    <Ionicons name="chatbubble" size={20} color="#fff" />
+                    <Text style={styles.respondModalBtnText}>Send Message</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+              
+              <TouchableOpacity style={[styles.respondModalBtn, { backgroundColor: '#334155' }]} onPress={() => setRespondModal(null)}>
+                <Text style={styles.respondModalBtnText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+      )}
     </SafeAreaView>
   );
 }
@@ -295,7 +291,7 @@ const styles = StyleSheet.create({
   detailText: { fontSize: 14, color: '#94A3B8' },
   panicActions: { flexDirection: 'row', marginTop: 16, gap: 12 },
   respondButton: { 
-    flex: 2,
+    flex: 1,
     flexDirection: 'row', 
     alignItems: 'center', 
     justifyContent: 'center', 
@@ -305,18 +301,16 @@ const styles = StyleSheet.create({
     backgroundColor: '#F59E0B',
   },
   respondButtonText: { fontSize: 16, fontWeight: '700', color: '#fff' },
-  callButton: { 
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 14,
-    borderRadius: 12,
-    backgroundColor: '#10B981'
-  },
-  actionButtonText: { fontSize: 14, fontWeight: '600', color: '#fff' },
   emptyContainer: { alignItems: 'center', paddingVertical: 80 },
   emptyText: { fontSize: 20, color: '#64748B', marginTop: 16, fontWeight: '600' },
   emptySubtext: { fontSize: 14, color: '#475569', marginTop: 4 },
+  // Respond Modal
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  respondModalContainer: { backgroundColor: '#1E293B', borderRadius: 20, padding: 24, width: '100%', maxWidth: 360 },
+  respondModalTitle: { fontSize: 18, fontWeight: 'bold', color: '#EF4444', marginBottom: 8, textAlign: 'center' },
+  respondModalName: { fontSize: 20, fontWeight: '700', color: '#fff', marginBottom: 4, textAlign: 'center' },
+  respondModalPhone: { fontSize: 15, color: '#10B981', marginBottom: 4, textAlign: 'center' },
+  respondModalCoords: { fontSize: 13, color: '#94A3B8', marginBottom: 20, textAlign: 'center' },
+  respondModalBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: '#3B82F6', paddingVertical: 14, borderRadius: 12, marginBottom: 10 },
+  respondModalBtnText: { fontSize: 16, fontWeight: '600', color: '#fff' },
 });
