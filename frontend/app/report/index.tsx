@@ -158,9 +158,10 @@ export default function VideoReport() {
     try {
       console.log('[VideoReport] Starting camera.recordAsync()...');
       recordingPromiseRef.current = cameraRef.recordAsync({ 
-        maxDuration: 300, 
-        quality: '720p',
-        mute: false
+        maxDuration: 120, // 2 min max for reasonable file size
+        quality: '480p',  // Use 480p to reduce file size significantly vs 720p
+        mute: false,
+        videoBitrate: 1500000, // 1.5 Mbps for manageable upload sizes
       });
       
       const video = await recordingPromiseRef.current;
@@ -302,7 +303,12 @@ export default function VideoReport() {
         throw new Error('Video file not found or is empty');
       }
       
-      console.log('[VideoReport] Uploading - Size:', fileInfo.size, 'Duration:', finalDuration);
+      // Warn if file is very large (>50MB)
+      const fileSizeMB = (fileInfo.size / (1024 * 1024)).toFixed(1);
+      if (fileInfo.size > 50 * 1024 * 1024) {
+        console.warn('[VideoReport] Large file detected:', fileSizeMB, 'MB');
+      }
+      console.log('[VideoReport] Uploading - Size:', fileSizeMB, 'MB, Duration:', finalDuration);
 
       setUploadProgress(20);
       const base64Video = await FileSystem.readAsStringAsync(recordingUri, {
