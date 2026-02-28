@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { getAuthToken, clearAuthData, getUserMetadata } from '../utils/auth';
 
@@ -50,6 +51,16 @@ export default function Settings() {
     try {
       const token = await getAuthToken();
       if (!token) return;
+
+      // Load local customization first for instant display
+      try {
+        const localCustomization = await AsyncStorage.getItem('app_customization');
+        if (localCustomization) {
+          const { app_name, app_logo } = JSON.parse(localCustomization);
+          if (app_name) setAppName(app_name);
+          if (app_logo) setSelectedIcon(app_logo);
+        }
+      } catch (e) {}
       
       const response = await axios.get(`${BACKEND_URL}/api/user/profile`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -99,7 +110,10 @@ export default function Settings() {
         timeout: 10000
       });
 
-      Alert.alert('Success', 'App customization saved');
+      // Persist locally so the app header updates immediately
+      await AsyncStorage.setItem('app_customization', JSON.stringify({ app_name: appName, app_logo: selectedIcon }));
+
+      Alert.alert('Success', `App customization saved! The app will now appear as "${appName}".`);
     } catch (error: any) {
       console.error('[Settings] Save error:', error?.response?.data);
       if (error?.response?.status === 401) {
