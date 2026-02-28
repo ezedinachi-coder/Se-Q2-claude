@@ -358,6 +358,11 @@ export default function ReportList() {
             resizeMode={ResizeMode.CONTAIN}
             shouldPlay
             isLooping={false}
+            onError={(error) => {
+              Alert.alert('Playback Error', 'Unable to play this video. It may still be processing.', [
+                { text: 'OK', onPress: () => setSelectedVideo(null) }
+              ]);
+            }}
           />
         </View>
       </SafeAreaView>
