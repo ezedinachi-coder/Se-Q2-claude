@@ -20,6 +20,8 @@ export default function CivilHome() {
   const [totalReportCount, setTotalReportCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [hasActivePanic, setHasActivePanic] = useState(false);
+  const [appDisplayName, setAppDisplayName] = useState('SafeGuard');
+  const [appDisplayIcon, setAppDisplayIcon] = useState('shield');
 
   // Refresh on every screen focus using expo-router's useFocusEffect
   useFocusEffect(
@@ -45,6 +47,16 @@ export default function CivilHome() {
     // Check for active panic
     const activePanic = await AsyncStorage.getItem('active_panic');
     setHasActivePanic(!!activePanic);
+
+    // Load app customization
+    try {
+      const customization = await AsyncStorage.getItem('app_customization');
+      if (customization) {
+        const { app_name, app_logo } = JSON.parse(customization);
+        if (app_name) setAppDisplayName(app_name);
+        if (app_logo) setAppDisplayIcon(app_logo);
+      }
+    } catch (e) {}
     
     await Promise.all([
       checkUserStatus(),
@@ -171,7 +183,7 @@ export default function CivilHome() {
         <View style={styles.header}>
           <View>
             <Text style={styles.greeting}>Hello! {userName ? userName.split(' ')[0] : 'User'}</Text>
-            <Text style={styles.subGreeting}>Stay safe with SafeGuard</Text>
+            <Text style={styles.subGreeting}>Stay safe with {appDisplayName}</Text>
           </View>
           <TouchableOpacity onPress={() => router.push('/settings')}>
             <Ionicons name="settings-outline" size={28} color="#fff" />
