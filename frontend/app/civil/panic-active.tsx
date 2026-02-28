@@ -55,7 +55,7 @@ const EMERGENCY_SERVICES = {
 };
 
 // Security emergencies that notify agencies
-const SECURITY_EMERGENCIES = ['violence', 'robbery', 'kidnapping', 'breakin', 'harassment', 'other'];
+const SECURITY_EMERGENCIES = ['violence', 'robbery', 'kidnapping', 'breakin', 'burglary', 'harassment', 'other'];
 
 export default function PanicActive() {
   const router = useRouter();
@@ -172,19 +172,8 @@ export default function PanicActive() {
 
       startLocationTracking(token);
 
-      Alert.alert(
-        'Panic Mode Activated',
-        'Nearby security agencies have been alerted. Your phone will go to sleep for discreet tracking.',
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              // Exit app for discreet tracking
-              BackHandler.exitApp();
-            }
-          }
-        ]
-      );
+      // Immediately close app for discreet background tracking (no OK dialog needed)
+      BackHandler.exitApp();
     } catch (error: any) {
       console.error('[PanicActive] Activation error:', error?.response?.data);
       if (error?.response?.status === 401) {
