@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator, Alert, RefreshControl, Linking, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -182,14 +182,17 @@ export default function SecurityReports() {
     if (item.is_anonymous) {
       if (userRole === 'admin') {
         return {
-          name: item.sender_email || item.user_email || 'Unknown',
+          name: item.sender_name || item.full_name || item.sender_email || item.user_email || 'Unknown',
           label: '(Anonymous - for discreet attendance)'
         };
       } else {
         return { name: 'Anonymous', label: '' };
       }
     }
-    return { name: item.sender_email || item.user_email || 'Unknown User', label: '' };
+    return { 
+      name: item.sender_name || item.full_name || item.sender_email || item.user_email || 'Unknown User', 
+      label: '' 
+    };
   };
 
   const formatDate = (dateString: string) => {
@@ -319,6 +322,11 @@ export default function SecurityReports() {
             resizeMode={ResizeMode.CONTAIN}
             shouldPlay
             isLooping={false}
+            onError={(error) => {
+              Alert.alert('Playback Error', 'Unable to play this video. It may still be processing.', [
+                { text: 'OK', onPress: () => setSelectedVideoUrl(null) }
+              ]);
+            }}
           />
         </View>
       </SafeAreaView>
