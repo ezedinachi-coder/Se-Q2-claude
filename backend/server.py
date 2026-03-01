@@ -360,8 +360,34 @@ async def get_profile(user = Depends(get_current_user)):
         'is_premium': user.get('is_premium', False),
         'app_name': user.get('app_name', 'SafeGuard'),
         'app_logo': user.get('app_logo', 'shield'),
+        'profile_photo_url': user.get('profile_photo_url', None),
+        'emergency_contacts': user.get('emergency_contacts', []),
         'created_at': user.get('created_at')
     }
+
+class ProfilePhotoUpdate(BaseModel):
+    photo_data: str  # Base64 encoded image
+    mime_type: str = "image/jpeg"
+
+@api_router.put("/user/profile-photo")
+async def update_profile_photo(data: ProfilePhotoUpdate, user = Depends(get_current_user)):
+    """Upload and update user profile photo"""
+    try:
+        import base64
+        img_bytes = base64.b64decode(data.photo_data)
+        if len(img_bytes) > 5 * 1024 * 1024:  # 5MB limit
+            raise HTTPException(status_code=400, detail="Image too large (max 5MB)")
+        photo_url = f"data:{data.mime_type};base64,{data.photo_data}"
+        await db.users.update_one(
+            {'_id': user['_id']},
+            {'$set': {'profile_photo_url': photo_url, 'profile_photo_updated_at': datetime.utcnow()}}
+        )
+        return {'message': 'Profile photo updated', 'photo_url': photo_url}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating profile photo: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update profile photo")
 
 @api_router.put("/user/customize-app")
 async def customize_app(customization: AppCustomization, user = Depends(get_current_user)):
@@ -864,17 +890,40 @@ async def track_user(user_id: str, user = Depends(get_current_user)):
             latitude = coords[1]
             last_update = target_user.get('last_location_update')
         
+        # Build location history list
+        location_history = []
+        if active_panic and active_panic.get('locations'):
+            for loc in active_panic['locations']:
+                location_history.append({
+                    'latitude': loc.get('latitude'),
+                    'longitude': loc.get('longitude'),
+                    'timestamp': loc.get('timestamp').isoformat() if hasattr(loc.get('timestamp'), 'isoformat') else loc.get('timestamp'),
+                    'accuracy': loc.get('accuracy'),
+                    'source': 'panic'
+                })
+        elif active_escort and active_escort.get('route'):
+            for loc in active_escort['route']:
+                location_history.append({
+                    'latitude': loc.get('latitude'),
+                    'longitude': loc.get('longitude'),
+                    'timestamp': loc.get('timestamp').isoformat() if hasattr(loc.get('timestamp'), 'isoformat') else loc.get('timestamp'),
+                    'accuracy': loc.get('accuracy'),
+                    'source': 'escort'
+                })
+
         return {
             'user_id': user_id,
             'full_name': target_user.get('full_name', ''),
             'email': target_user.get('email', ''),
             'phone': target_user.get('phone', ''),
+            'profile_photo_url': target_user.get('profile_photo_url', None),
             'latitude': latitude,
             'longitude': longitude,
-            'last_update': last_update.isoformat() if last_update else None,
+            'last_update': last_update.isoformat() if hasattr(last_update, 'isoformat') else last_update,
             'is_active': is_active,
             'has_panic': active_panic is not None,
-            'has_escort': active_escort is not None
+            'has_escort': active_escort is not None,
+            'location_history': location_history
         }
     except Exception as e:
         logger.error(f"Error tracking user: {e}")
