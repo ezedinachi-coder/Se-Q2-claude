@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput, Alert, ActivityIndicator, FlatList, KeyboardAvoidingView, Platform, Image } from 'react-native';
-import * as ImagePicker from 'expo-image-picker';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput, Alert, ActivityIndicator, FlatList, KeyboardAvoidingView, Platform, Image, Modal } from 'react-native';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -21,6 +21,7 @@ interface EmergencyContact {
 
 export default function Settings() {
   const router = useRouter();
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [loading, setLoading] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
   const [appName, setAppName] = useState('SafeGuard');
@@ -34,6 +35,8 @@ export default function Settings() {
   const [savingContacts, setSavingContacts] = useState(false);
   const [profilePhoto, setProfilePhoto] = useState<string | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [showCamera, setShowCamera] = useState(false);
+  const cameraRef = React.useRef<CameraView>(null);
   const [currentPin, setCurrentPin] = useState('');
   const [newPin, setNewPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
@@ -97,37 +100,37 @@ export default function Settings() {
   };
 
   const pickAndUploadPhoto = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission Required', 'Please allow access to your photo library');
-      return;
+    if (!cameraPermission?.granted) {
+      const result = await requestCameraPermission();
+      if (!result.granted) {
+        Alert.alert('Permission Required', 'Camera permission is needed to take your profile photo');
+        return;
+      }
     }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.7,
-      base64: true,
-    });
-    if (result.canceled || !result.assets?.[0]) return;
+    setShowCamera(true);
+  };
 
-    const asset = result.assets[0];
-    if (!asset.base64) { Alert.alert('Error', 'Could not read image data'); return; }
-
+  const captureAndUpload = async () => {
+    if (!cameraRef.current) return;
     setUploadingPhoto(true);
+    setShowCamera(false);
     try {
+      const photo = await cameraRef.current.takePictureAsync({ base64: true, quality: 0.7 });
+      if (!photo?.base64) { Alert.alert('Error', 'Could not read photo data'); return; }
+
       const token = await getAuthToken();
       if (!token) { router.replace('/auth/login'); return; }
-      const mimeType = asset.mimeType || 'image/jpeg';
+
       const response = await axios.put(`${BACKEND_URL}/api/user/profile-photo`, {
-        photo_data: asset.base64,
-        mime_type: mimeType,
+        photo_data: photo.base64,
+        mime_type: 'image/jpeg',
       }, { headers: { Authorization: `Bearer ${token}` }, timeout: 30000 });
+
       setProfilePhoto(response.data.photo_url);
-      Alert.alert('Success', 'Profile photo updated!');
+      Alert.alert('Success', 'Profile photo updated! Security agents can now identify you.');
     } catch (error: any) {
       console.error('[Settings] Photo upload error:', error?.response?.data);
-      Alert.alert('Error', 'Failed to upload photo');
+      Alert.alert('Error', 'Failed to upload photo. Please try again.');
     } finally {
       setUploadingPhoto(false);
     }
@@ -485,6 +488,33 @@ export default function Settings() {
           <View style={{ height: 40 }} />
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Camera Modal */}
+      <Modal visible={showCamera} animationType="slide" onRequestClose={() => setShowCamera(false)}>
+        <View style={styles.cameraModal}>
+          <CameraView ref={cameraRef} style={styles.cameraView} facing="front">
+            <View style={styles.cameraOverlay}>
+              <View style={styles.cameraHeader}>
+                <TouchableOpacity onPress={() => setShowCamera(false)} style={styles.cameraCancelBtn}>
+                  <Ionicons name="close" size={28} color="#fff" />
+                </TouchableOpacity>
+                <Text style={styles.cameraTitle}>Take Profile Photo</Text>
+                <View style={{ width: 44 }} />
+              </View>
+              <View style={styles.cameraGuide}>
+                <View style={styles.cameraFaceFrame} />
+                <Text style={styles.cameraGuideText}>Position your face in the circle</Text>
+              </View>
+              <View style={styles.cameraBottom}>
+                <TouchableOpacity style={styles.captureBtn} onPress={captureAndUpload}>
+                  <View style={styles.captureBtnInner} />
+                </TouchableOpacity>
+              </View>
+            </View>
+          </CameraView>
+        </View>
+      </Modal>
+
     </SafeAreaView>
   );
 }
@@ -537,4 +567,17 @@ const styles = StyleSheet.create({
   aboutDescription: { fontSize: 14, color: '#94A3B8', textAlign: 'center', marginTop: 8 },
   profileAvatarImage: { width: 70, height: 70, borderRadius: 35 },
   photoEditBadge: { position: 'absolute', bottom: 0, right: 0, backgroundColor: '#3B82F6', borderRadius: 10, width: 20, height: 20, justifyContent: 'center', alignItems: 'center' },
+  // Camera modal
+  cameraModal: { flex: 1, backgroundColor: '#000' },
+  cameraView: { flex: 1 },
+  cameraOverlay: { flex: 1, justifyContent: 'space-between' },
+  cameraHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, paddingTop: 60, backgroundColor: 'rgba(0,0,0,0.4)' },
+  cameraCancelBtn: { width: 44, height: 44, justifyContent: 'center', alignItems: 'center' },
+  cameraTitle: { fontSize: 18, fontWeight: '600', color: '#fff' },
+  cameraGuide: { alignItems: 'center' },
+  cameraFaceFrame: { width: 220, height: 220, borderRadius: 110, borderWidth: 3, borderColor: 'rgba(255,255,255,0.7)', borderStyle: 'dashed' },
+  cameraGuideText: { color: 'rgba(255,255,255,0.8)', marginTop: 16, fontSize: 14 },
+  cameraBottom: { alignItems: 'center', paddingBottom: 60, backgroundColor: 'rgba(0,0,0,0.4)' },
+  captureBtn: { width: 80, height: 80, borderRadius: 40, borderWidth: 4, borderColor: '#fff', justifyContent: 'center', alignItems: 'center' },
+  captureBtnInner: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#fff' },
 });
