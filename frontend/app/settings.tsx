@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput, Alert, ActivityIndicator, FlatList, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput, Alert, ActivityIndicator, FlatList, KeyboardAvoidingView, Platform, Image } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -31,6 +32,12 @@ export default function Settings() {
     { name: '', phone: '', email: '' }
   ]);
   const [savingContacts, setSavingContacts] = useState(false);
+  const [profilePhoto, setProfilePhoto] = useState<string | null>(null);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [currentPin, setCurrentPin] = useState('');
+  const [newPin, setNewPin] = useState('');
+  const [confirmPin, setConfirmPin] = useState('');
+  const [savingPin, setSavingPin] = useState(false);
 
   useEffect(() => {
     initializeSettings();
@@ -70,6 +77,7 @@ export default function Settings() {
       setUserProfile(response.data);
       setAppName(response.data.app_name || 'SafeGuard');
       setSelectedIcon(response.data.app_logo || 'shield');
+      if (response.data.profile_photo_url) setProfilePhoto(response.data.profile_photo_url);
       
       // Load emergency contacts
       if (response.data.emergency_contacts && response.data.emergency_contacts.length > 0) {
@@ -85,6 +93,64 @@ export default function Settings() {
         await clearAuthData();
         router.replace('/auth/login');
       }
+    }
+  };
+
+  const pickAndUploadPhoto = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission Required', 'Please allow access to your photo library');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.7,
+      base64: true,
+    });
+    if (result.canceled || !result.assets?.[0]) return;
+
+    const asset = result.assets[0];
+    if (!asset.base64) { Alert.alert('Error', 'Could not read image data'); return; }
+
+    setUploadingPhoto(true);
+    try {
+      const token = await getAuthToken();
+      if (!token) { router.replace('/auth/login'); return; }
+      const mimeType = asset.mimeType || 'image/jpeg';
+      const response = await axios.put(`${BACKEND_URL}/api/user/profile-photo`, {
+        photo_data: asset.base64,
+        mime_type: mimeType,
+      }, { headers: { Authorization: `Bearer ${token}` }, timeout: 30000 });
+      setProfilePhoto(response.data.photo_url);
+      Alert.alert('Success', 'Profile photo updated!');
+    } catch (error: any) {
+      console.error('[Settings] Photo upload error:', error?.response?.data);
+      Alert.alert('Error', 'Failed to upload photo');
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
+
+  const savePin = async () => {
+    if (newPin.length !== 4 || !/^\d{4}$/.test(newPin)) {
+      Alert.alert('Invalid PIN', 'PIN must be exactly 4 digits');
+      return;
+    }
+    if (newPin !== confirmPin) {
+      Alert.alert('PIN Mismatch', 'New PIN and confirmation do not match');
+      return;
+    }
+    setSavingPin(true);
+    try {
+      await AsyncStorage.setItem('security_pin', newPin);
+      setCurrentPin(''); setNewPin(''); setConfirmPin('');
+      Alert.alert('Success', 'Security PIN updated! Use this PIN to unlock the app after panic mode.');
+    } catch (e) {
+      Alert.alert('Error', 'Failed to save PIN');
+    } finally {
+      setSavingPin(false);
     }
   };
 
@@ -196,9 +262,16 @@ export default function Settings() {
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Your Profile</Text>
               <View style={styles.profileCard}>
-                <View style={styles.profileAvatar}>
-                  <Ionicons name="person" size={40} color="#3B82F6" />
-                </View>
+                <TouchableOpacity style={styles.profileAvatar} onPress={pickAndUploadPhoto} disabled={uploadingPhoto}>
+                  {profilePhoto ? (
+                    <Image source={{ uri: profilePhoto }} style={styles.profileAvatarImage} />
+                  ) : (
+                    <Ionicons name="person" size={40} color="#3B82F6" />
+                  )}
+                  <View style={styles.photoEditBadge}>
+                    {uploadingPhoto ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="camera" size={12} color="#fff" />}
+                  </View>
+                </TouchableOpacity>
                 <View style={styles.profileInfo}>
                   <Text style={styles.profileName}>{userProfile.full_name || 'User'}</Text>
                   <Text style={styles.profileEmail}>{userProfile.email}</Text>
@@ -218,7 +291,7 @@ export default function Settings() {
           {/* App Customization Section */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>App Customization</Text>
-            <Text style={styles.sectionDescription}>Change app name and icon for anonymity</Text>
+            <Text style={styles.sectionDescription}>Disguise the app name and icon. The custom name will show as the app title and in your phone's app launcher if the device supports dynamic shortcuts.</Text>
 
             <View style={styles.customizationCard}>
               <Text style={styles.inputLabel}>App Name</Text>
@@ -360,6 +433,44 @@ export default function Settings() {
             </View>
           </View>
 
+          {/* Security PIN Section */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Security PIN</Text>
+            <Text style={styles.sectionDescription}>Set a 4-digit PIN to unlock the app after panic mode activates</Text>
+            <View style={styles.customizationCard}>
+              <Text style={styles.inputLabel}>New PIN (4 digits)</Text>
+              <TextInput
+                style={styles.input}
+                value={newPin}
+                onChangeText={(v) => setNewPin(v.replace(/[^0-9]/g, '').slice(0, 4))}
+                placeholder="Enter 4-digit PIN"
+                placeholderTextColor="#64748B"
+                keyboardType="numeric"
+                secureTextEntry
+                maxLength={4}
+              />
+              <Text style={styles.inputLabel}>Confirm PIN</Text>
+              <TextInput
+                style={styles.input}
+                value={confirmPin}
+                onChangeText={(v) => setConfirmPin(v.replace(/[^0-9]/g, '').slice(0, 4))}
+                placeholder="Confirm PIN"
+                placeholderTextColor="#64748B"
+                keyboardType="numeric"
+                secureTextEntry
+                maxLength={4}
+              />
+              <TouchableOpacity style={[styles.saveButton, { backgroundColor: '#8B5CF6' }]} onPress={savePin} disabled={savingPin}>
+                {savingPin ? <ActivityIndicator color="#fff" /> : (
+                  <>
+                    <Ionicons name="lock-closed" size={20} color="#fff" />
+                    <Text style={styles.saveButtonText}>Save Security PIN</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+
           {/* About Section */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>About</Text>
@@ -424,4 +535,6 @@ const styles = StyleSheet.create({
   aboutTitle: { fontSize: 22, fontWeight: 'bold', color: '#fff', marginTop: 12 },
   aboutVersion: { fontSize: 14, color: '#64748B', marginTop: 4 },
   aboutDescription: { fontSize: 14, color: '#94A3B8', textAlign: 'center', marginTop: 8 },
+  profileAvatarImage: { width: 70, height: 70, borderRadius: 35 },
+  photoEditBadge: { position: 'absolute', bottom: 0, right: 0, backgroundColor: '#3B82F6', borderRadius: 10, width: 20, height: 20, justifyContent: 'center', alignItems: 'center' },
 });
