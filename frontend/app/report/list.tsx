@@ -38,6 +38,8 @@ export default function ReportList() {
   
   // Video player state
   const [selectedVideo, setSelectedVideo] = useState<string | null>(null);
+  const [videoLoading, setVideoLoading] = useState(true);
+  const [videoError, setVideoError] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -327,7 +329,7 @@ export default function ReportList() {
             {isVideo && (
               <TouchableOpacity
                 style={styles.playButton}
-                onPress={() => setSelectedVideo(item.file_url)}
+                onPress={() => { setVideoError(false); setVideoLoading(true); setSelectedVideo(item.file_url); }}
               >
                 <Ionicons name="play-circle" size={24} color="#10B981" />
                 <Text style={styles.playButtonText}>Watch Video</Text>
@@ -342,7 +344,7 @@ export default function ReportList() {
   // Video player modal
   if (selectedVideo) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={[styles.container, { backgroundColor: '#000' }]}>
         <View style={styles.videoHeader}>
           <TouchableOpacity onPress={() => setSelectedVideo(null)}>
             <Ionicons name="close" size={28} color="#fff" />
@@ -351,19 +353,35 @@ export default function ReportList() {
           <View style={{ width: 28 }} />
         </View>
         <View style={styles.videoContainer}>
-          <Video
-            source={{ uri: selectedVideo }}
-            style={styles.video}
-            useNativeControls
-            resizeMode={ResizeMode.CONTAIN}
-            shouldPlay
-            isLooping={false}
-            onError={(error) => {
-              Alert.alert('Playback Error', 'Unable to play this video. It may still be processing.', [
-                { text: 'OK', onPress: () => setSelectedVideo(null) }
-              ]);
-            }}
-          />
+          {videoLoading && !videoError && (
+            <View style={styles.videoLoadingOverlay}>
+              <ActivityIndicator size="large" color="#3B82F6" />
+              <Text style={styles.videoLoadingText}>Loading video...</Text>
+            </View>
+          )}
+          {videoError ? (
+            <View style={styles.videoErrorContainer}>
+              <Ionicons name="cloud-offline-outline" size={60} color="#64748B" />
+              <Text style={styles.videoErrorTitle}>Video Unavailable</Text>
+              <Text style={styles.videoErrorText}>This video may still be processing. Please try again in a few minutes.</Text>
+              <TouchableOpacity style={styles.videoRetryBtn} onPress={() => { setVideoError(false); setVideoLoading(true); }}>
+                <Ionicons name="refresh" size={18} color="#fff" />
+                <Text style={styles.videoRetryText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <Video
+              source={{ uri: selectedVideo }}
+              style={styles.video}
+              useNativeControls
+              resizeMode={ResizeMode.CONTAIN}
+              shouldPlay
+              isLooping={false}
+              onReadyForDisplay={() => setVideoLoading(false)}
+              onLoad={() => setVideoLoading(false)}
+              onError={() => { setVideoLoading(false); setVideoError(true); }}
+            />
+          )}
         </View>
       </SafeAreaView>
     );
@@ -455,6 +473,13 @@ const styles = StyleSheet.create({
   videoTitle: { fontSize: 18, fontWeight: 'bold', color: '#fff' },
   videoContainer: { flex: 1, backgroundColor: '#000', justifyContent: 'center' },
   video: { width: '100%', height: 300 },
+  videoLoadingOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000', zIndex: 2 },
+  videoLoadingText: { color: '#94A3B8', marginTop: 12, fontSize: 15 },
+  videoErrorContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 },
+  videoErrorTitle: { color: '#fff', fontSize: 20, fontWeight: '600', marginTop: 16 },
+  videoErrorText: { color: '#94A3B8', fontSize: 14, textAlign: 'center', marginTop: 8, lineHeight: 20 },
+  videoRetryBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#3B82F6', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 10, marginTop: 20 },
+  videoRetryText: { color: '#fff', fontWeight: '600' },
   
   // Empty state
   emptyContainer: { alignItems: 'center', paddingVertical: 80 },
