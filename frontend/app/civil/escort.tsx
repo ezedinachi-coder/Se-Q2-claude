@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -174,7 +174,7 @@ export default function Escort() {
       } catch (error) {
         console.error('[Escort] Location tracking error:', error);
       }
-    }, 30000);
+    }, 300000); // 5 minutes
   };
 
   const stopEscort = async () => {
