@@ -20,7 +20,25 @@ export default function Escort() {
   const [isPremium, setIsPremium] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [startTime, setStartTime] = useState<string | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [currentGps, setCurrentGps] = useState<{lat: number; lng: number; updatedAt: string} | null>(null);
   const intervalRef = useRef<any>(null);
+  const timerRef = useRef<any>(null);
+
+  // Live timer — updates every second while tracking
+  useEffect(() => {
+    if (isTracking && startTime) {
+      const start = new Date(startTime).getTime();
+      setElapsedSeconds(Math.floor((Date.now() - start) / 1000));
+      timerRef.current = setInterval(() => {
+        setElapsedSeconds(Math.floor((Date.now() - start) / 1000));
+      }, 1000);
+    } else {
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+      setElapsedSeconds(0);
+    }
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, [isTracking, startTime]);
 
   // Check for active escort on every page focus
   useFocusEffect(
@@ -157,10 +175,18 @@ export default function Escort() {
 
   const startLocationTracking = async (token: string) => {
     if (intervalRef.current) clearInterval(intervalRef.current);
+
+    // Immediately get current GPS
+    try {
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      setCurrentGps({ lat: loc.coords.latitude, lng: loc.coords.longitude, updatedAt: new Date().toLocaleTimeString() });
+    } catch (e) {}
     
     intervalRef.current = setInterval(async () => {
       try {
         const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+        // Update visible GPS in UI
+        setCurrentGps({ lat: location.coords.latitude, lng: location.coords.longitude, updatedAt: new Date().toLocaleTimeString() });
         await axios.post(`${BACKEND_URL}/api/escort/location`, {
           latitude: location.coords.latitude,
           longitude: location.coords.longitude,
@@ -170,11 +196,11 @@ export default function Escort() {
           headers: { Authorization: `Bearer ${token}` },
           timeout: 10000 
         });
-        console.log('[Escort] Location tracked');
+        console.log('[Escort] Location tracked:', location.coords.latitude.toFixed(4), location.coords.longitude.toFixed(4));
       } catch (error) {
         console.error('[Escort] Location tracking error:', error);
       }
-    }, 300000); // 5 minutes
+    }, 60000); // Every 1 minute
   };
 
   const stopEscort = async () => {
@@ -220,12 +246,8 @@ export default function Escort() {
   };
 
   const formatElapsedTime = () => {
-    if (!startTime) return '0:00';
-    const start = new Date(startTime).getTime();
-    const now = Date.now();
-    const seconds = Math.floor((now - start) / 1000);
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
+    const mins = Math.floor(elapsedSeconds / 60);
+    const secs = elapsedSeconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
@@ -263,7 +285,25 @@ export default function Escort() {
             <Text style={styles.trackingSubtitle}>Security can track your journey</Text>
             <Text style={styles.elapsedTime}>Duration: {formatElapsedTime()}</Text>
 
-            <TouchableOpacity 
+            {/* GPS Location Log */}
+            <View style={styles.gpsPanel}>
+              <View style={styles.gpsPanelHeader}>
+                <Ionicons name="location" size={16} color="#10B981" />
+                <Text style={styles.gpsPanelTitle}>GPS Location Tracking</Text>
+                <View style={styles.gpsActiveDot} />
+              </View>
+              {currentGps ? (
+                <View style={styles.gpsCoords}>
+                  <Text style={styles.gpsCoordsText}>
+                    {currentGps.lat.toFixed(6)}, {currentGps.lng.toFixed(6)}
+                  </Text>
+                  <Text style={styles.gpsUpdatedText}>Last updated: {currentGps.updatedAt}</Text>
+                </View>
+              ) : (
+                <Text style={styles.gpsWaitingText}>Acquiring location...</Text>
+              )}
+              <Text style={styles.gpsNoteText}>Location logged to server every 1 minute</Text>
+            </View> 
               style={styles.arrivedButton}
               onPress={stopEscort}
               disabled={loading}
@@ -349,4 +389,13 @@ const styles = StyleSheet.create({
   elapsedTime: { fontSize: 20, color: '#fff', fontWeight: '600', marginBottom: 40 },
   arrivedButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, backgroundColor: '#10B981', paddingVertical: 16, paddingHorizontal: 32, borderRadius: 12, width: '100%' },
   arrivedButtonText: { fontSize: 18, fontWeight: '600', color: '#fff' },
+  gpsPanel: { width: '100%', backgroundColor: '#0F172A', borderRadius: 12, padding: 14, marginBottom: 24, borderWidth: 1, borderColor: '#10B98130' },
+  gpsPanelHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 },
+  gpsPanelTitle: { fontSize: 13, fontWeight: '600', color: '#10B981', flex: 1 },
+  gpsActiveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#10B981' },
+  gpsCoords: {},
+  gpsCoordsText: { fontSize: 13, color: '#fff', fontFamily: 'monospace', marginBottom: 4 },
+  gpsUpdatedText: { fontSize: 11, color: '#64748B' },
+  gpsWaitingText: { fontSize: 13, color: '#64748B', fontStyle: 'italic' },
+  gpsNoteText: { fontSize: 11, color: '#475569', marginTop: 8 },
 });
