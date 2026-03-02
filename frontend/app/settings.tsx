@@ -111,11 +111,17 @@ export default function Settings() {
   };
 
   const captureAndUpload = async () => {
-    if (!cameraRef.current) return;
+    if (!cameraRef.current) {
+      Alert.alert('Error', 'Camera not ready. Please try again.');
+      return;
+    }
     setUploadingPhoto(true);
-    setShowCamera(false);
     try {
+      // Take the photo FIRST while camera is still mounted
       const photo = await cameraRef.current.takePictureAsync({ base64: true, quality: 0.7 });
+      // Close camera AFTER photo is captured
+      setShowCamera(false);
+
       if (!photo?.base64) { Alert.alert('Error', 'Could not read photo data'); return; }
 
       const token = await getAuthToken();
@@ -129,8 +135,9 @@ export default function Settings() {
       setProfilePhoto(response.data.photo_url);
       Alert.alert('Success', 'Profile photo updated! Security agents can now identify you.');
     } catch (error: any) {
-      console.error('[Settings] Photo upload error:', error?.response?.data);
-      Alert.alert('Error', 'Failed to upload photo. Please try again.');
+      console.error('[Settings] Photo upload error:', error?.response?.data || error?.message);
+      const msg = error?.response?.data?.detail || 'Failed to upload photo. Please try again.';
+      Alert.alert('Upload Failed', msg);
     } finally {
       setUploadingPhoto(false);
     }
