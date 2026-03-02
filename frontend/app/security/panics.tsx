@@ -138,9 +138,14 @@ export default function SecurityPanics() {
           </View>
           <View style={styles.panicInfo}>
             <Text style={styles.panicTitle}>🚨 ACTIVE PANIC</Text>
-            <Text style={styles.panicSender}>{senderName}</Text>
-            {senderPhone && (
-              <Text style={styles.panicPhone}>📞 {senderPhone}</Text>
+            <Text style={styles.panicName}>
+              👤 {item.full_name && item.full_name.trim() ? item.full_name.trim() : (item.user_name && item.user_name !== item.user_email ? item.user_name : 'Unknown User')}
+            </Text>
+            <Text style={styles.panicEmail}>✉️ {item.user_email || 'No email'}</Text>
+            {(item.user_phone || item.phone) ? (
+              <Text style={styles.panicPhone}>📞 {item.user_phone || item.phone}</Text>
+            ) : (
+              <Text style={styles.panicPhoneEmpty}>📞 No phone on file</Text>
             )}
           </View>
         </View>
@@ -283,9 +288,10 @@ const styles = StyleSheet.create({
   panicIcon: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#EF444420', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
   panicInfo: { flex: 1 },
   panicTitle: { fontSize: 16, fontWeight: 'bold', color: '#EF4444', marginBottom: 4 },
-  panicSender: { fontSize: 16, fontWeight: '600', color: '#fff', marginBottom: 2 },
-  panicEmail: { fontSize: 14, color: '#94A3B8', marginBottom: 2 },
-  panicPhone: { fontSize: 14, color: '#10B981' },
+  panicName: { fontSize: 16, fontWeight: '700', color: '#fff', marginBottom: 3 },
+  panicEmail: { fontSize: 13, color: '#94A3B8', marginBottom: 3 },
+  panicPhone: { fontSize: 13, color: '#10B981', fontWeight: '500' },
+  panicPhoneEmpty: { fontSize: 13, color: '#475569', fontStyle: 'italic' },
   panicDetails: { marginTop: 16, backgroundColor: '#0F172A', borderRadius: 12, padding: 12 },
   detailRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
   detailText: { fontSize: 14, color: '#94A3B8' },
