@@ -229,6 +229,12 @@ export default function SecurityHome() {
             </View>
             <Text style={styles.quickActionText}>Chat</Text>
           </TouchableOpacity>
+          <TouchableOpacity style={styles.quickAction} onPress={() => router.push('/security/escort-sessions')}>
+            <View style={[styles.quickActionIcon, { backgroundColor: '#10B98120' }]}>
+              <Ionicons name="navigate" size={24} color="#10B981" />
+            </View>
+            <Text style={styles.quickActionText}>Escorts</Text>
+          </TouchableOpacity>
           <TouchableOpacity style={styles.quickAction} onPress={() => router.push('/security/settings')}>
             <View style={[styles.quickActionIcon, { backgroundColor: '#8B5CF620' }]}>
               <Ionicons name="settings" size={24} color="#8B5CF6" />
