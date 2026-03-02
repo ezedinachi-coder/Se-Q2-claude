@@ -297,20 +297,19 @@ export default function VideoReport() {
         return;
       }
       
-      setUploadProgress(10);
+      setUploadProgress(5);
       const fileInfo = await FileSystem.getInfoAsync(recordingUri);
       if (!fileInfo.exists || !fileInfo.size || fileInfo.size === 0) {
         throw new Error('Video file not found or is empty');
       }
       
-      // Warn if file is very large (>50MB)
       const fileSizeMB = (fileInfo.size / (1024 * 1024)).toFixed(1);
       if (fileInfo.size > 50 * 1024 * 1024) {
         console.warn('[VideoReport] Large file detected:', fileSizeMB, 'MB');
       }
       console.log('[VideoReport] Uploading - Size:', fileSizeMB, 'MB, Duration:', finalDuration);
 
-      setUploadProgress(20);
+      setUploadProgress(15);
       const base64Video = await FileSystem.readAsStringAsync(recordingUri, {
         encoding: FileSystem.EncodingType.Base64,
       });
@@ -319,7 +318,7 @@ export default function VideoReport() {
         throw new Error('Failed to read video file');
       }
 
-      setUploadProgress(40);
+      setUploadProgress(30);
       
       const response = await axios.post(
         `${BACKEND_URL}/api/report/upload-video`,
@@ -340,8 +339,12 @@ export default function VideoReport() {
           },
           timeout: 120000,
           onUploadProgress: (progressEvent) => {
-            const progress = progressEvent.loaded / (progressEvent.total || 1);
-            setUploadProgress(40 + Math.round(progress * 50));
+            const loaded = progressEvent.loaded || 0;
+            const total = progressEvent.total || loaded || 1;
+            const rawPct = loaded / total;
+            // Map upload progress to 30%–95% range, clamped to avoid > 95
+            const pct = 30 + Math.min(Math.round(rawPct * 65), 65);
+            setUploadProgress(pct);
           }
         }
       );
