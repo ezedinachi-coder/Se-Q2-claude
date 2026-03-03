@@ -117,7 +117,7 @@ export default function Settings() {
             }
           }
           setShowCamera(true);
-        }
+        },
       },
       {
         text: 'Photo Library',
@@ -130,16 +130,16 @@ export default function Settings() {
           const result = await ImagePicker.launchImageLibraryAsync({
             mediaTypes: ImagePicker.MediaTypeOptions.Images,
             allowsEditing: true,
-            aspect: [1, 1],
+            aspect: [1, 1] as [number, number],
             quality: 0.7,
             base64: true,
           });
           if (!result.canceled && result.assets[0]?.base64) {
             await uploadBase64Photo(result.assets[0].base64);
           }
-        }
+        },
       },
-      { text: 'Cancel', style: 'cancel' }
+      { text: 'Cancel', style: 'cancel' },
     ]);
   };
 
@@ -154,7 +154,7 @@ export default function Settings() {
       }, { headers: { Authorization: `Bearer ${token}` }, timeout: 30000 });
       const photoUrl = response.data.photo_url;
       setProfilePhoto(photoUrl.startsWith('http') ? photoUrl : `${BACKEND_URL}${photoUrl}`);
-      Alert.alert('✅ Success', 'Profile photo updated! Security agents can now identify you.');
+      Alert.alert('Success', 'Profile photo updated! Security agents can now identify you.');
     } catch (error: any) {
       const msg = error?.response?.data?.detail || 'Failed to upload photo. Please try again.';
       Alert.alert('Upload Failed', msg);
@@ -622,4 +622,5 @@ const styles = StyleSheet.create({
   cameraGuideText: { color: 'rgba(255,255,255,0.8)', marginTop: 16, fontSize: 14 },
   cameraBottom: { alignItems: 'center', paddingBottom: 60, backgroundColor: 'rgba(0,0,0,0.4)' },
   captureBtn: { width: 80, height: 80, borderRadius: 40, borderWidth: 4, borderColor: '#fff', justifyContent: 'center', alignItems: 'center' },
-  captureBtnInner: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#fff' }
+  captureBtnInner: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#fff' },
+});
