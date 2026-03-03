@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -14,163 +14,159 @@ const BACKEND_URL = Constants.expoConfig?.extra?.backendUrl || process.env.EXPO_
 
 export default function SetLocation() {
   const router = useRouter();
-  const [region, setRegion] = useState({
-    latitude: 9.0820,
-    longitude: 8.6753,
-    latitudeDelta: 0.5,
-    longitudeDelta: 0.5,
-  });
+  const [region, setRegion] = useState({ latitude: 9.0820, longitude: 8.6753, latitudeDelta: 0.1, longitudeDelta: 0.1 });
   const [markerCoords, setMarkerCoords] = useState({ latitude: 9.0820, longitude: 8.6753 });
   const [radiusKm, setRadiusKm] = useState(10);
-  const [loading, setLoading] = useState(true); // Start with loading=true
+  const [loading, setLoading] = useState(true);
+  const [locating, setLocating] = useState(false);
+  const [locationSource, setLocationSource] = useState<'gps'|'saved'|'default'>('default');
+  const hasGotGPS = useRef(false);
 
-  useEffect(() => {
-    initializeLocation();
-  }, []);
+  useEffect(() => { initializeLocation(); }, []);
 
   const initializeLocation = async () => {
     setLoading(true);
     const token = await getAuthToken();
-    if (!token) {
-      router.replace('/auth/login');
-      return;
-    }
-    // Load current location first (prioritized)
-    await getCurrentLocation();
-    // Then check for saved location (will override if exists)
-    await loadSavedLocation();
+    if (!token) { router.replace('/auth/login'); return; }
+    // ALWAYS get fresh GPS first — do not override with stale saved location
+    await getMyCurrentLocation();
+    // Load radius from saved settings (but not coordinates unless GPS failed)
+    await loadSavedRadius();
     setLoading(false);
   };
 
-  const getCurrentLocation = async () => {
+  const getMyCurrentLocation = async () => {
+    setLocating(true);
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === 'granted') {
-        const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-        const coords = {
-          latitude: location.coords.latitude,
-          longitude: location.coords.longitude,
-        };
-        setRegion({ ...coords, latitudeDelta: 0.5, longitudeDelta: 0.5 });
-        setMarkerCoords(coords);
+      if (status !== 'granted') {
+        await loadSavedLocation();
+        return;
       }
+      const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.BestForNavigation });
+      const coords = { latitude: location.coords.latitude, longitude: location.coords.longitude };
+      hasGotGPS.current = true;
+      setMarkerCoords(coords);
+      setRegion({ ...coords, latitudeDelta: 0.05, longitudeDelta: 0.05 });
+      setLocationSource('gps');
     } catch (error) {
-      console.error('[SetLocation] Failed to get location:', error);
+      console.error('[SetLocation] GPS failed:', error);
+      await loadSavedLocation();
+    } finally {
+      setLocating(false);
     }
+  };
+
+  const loadSavedRadius = async () => {
+    try {
+      const token = await getAuthToken();
+      if (!token) return;
+      const response = await axios.get(`${BACKEND_URL}/api/security/team-location`, {
+        headers: { Authorization: `Bearer ${token}` }, timeout: 10000,
+      });
+      if (response.data.radius_km) setRadiusKm(response.data.radius_km);
+    } catch {}
   };
 
   const loadSavedLocation = async () => {
     try {
       const token = await getAuthToken();
       if (!token) return;
-      
       const response = await axios.get(`${BACKEND_URL}/api/security/team-location`, {
-        headers: { Authorization: `Bearer ${token}` },
-        timeout: 10000
+        headers: { Authorization: `Bearer ${token}` }, timeout: 10000,
       });
-      console.log('[SetLocation] Saved location loaded:', response.data);
-      if (response.data.latitude !== 0 && response.data.longitude !== 0) {
+      if (response.data.latitude !== 0 && response.data.longitude !== 0 && !hasGotGPS.current) {
         const coords = { latitude: response.data.latitude, longitude: response.data.longitude };
         setMarkerCoords(coords);
-        setRegion({ ...coords, latitudeDelta: 0.5, longitudeDelta: 0.5 });
-        setRadiusKm(response.data.radius_km || 10);
+        setRegion({ ...coords, latitudeDelta: 0.1, longitudeDelta: 0.1 });
+        setLocationSource('saved');
       }
+      if (response.data.radius_km) setRadiusKm(response.data.radius_km);
     } catch (error: any) {
-      console.error('[SetLocation] Failed to load saved location:', error?.response?.status);
-      if (error?.response?.status === 401) {
-        await clearAuthData();
-        router.replace('/auth/login');
-      }
+      if (error?.response?.status === 401) { await clearAuthData(); router.replace('/auth/login'); }
     }
+  };
+
+  const handleRefreshLocation = async () => {
+    hasGotGPS.current = false;
+    await getMyCurrentLocation();
   };
 
   const saveTeamLocation = async () => {
     setLoading(true);
     try {
       const token = await getAuthToken();
-      if (!token) {
-        router.replace('/auth/login');
-        return;
-      }
-      
-      console.log('[SetLocation] Saving location:', markerCoords, 'Radius:', radiusKm);
-      
-      const response = await axios.post(`${BACKEND_URL}/api/security/set-location`, {
-        latitude: markerCoords.latitude,
-        longitude: markerCoords.longitude,
-        radius_km: radiusKm
-      }, { 
-        headers: { Authorization: `Bearer ${token}` },
-        timeout: 15000
-      });
+      if (!token) { router.replace('/auth/login'); return; }
 
-      console.log('[SetLocation] Location saved:', response.data);
-      Alert.alert('Success', 'Team location updated successfully!', [
-        { text: 'OK', onPress: () => router.replace('/security/home') }
+      await axios.post(`${BACKEND_URL}/api/security/set-location`, {
+        latitude: markerCoords.latitude, longitude: markerCoords.longitude, radius_km: radiusKm,
+      }, { headers: { Authorization: `Bearer ${token}` }, timeout: 15000 });
+
+      // Also sync current_location for nearby queries
+      await axios.post(`${BACKEND_URL}/api/security/update-location`, {
+        latitude: markerCoords.latitude, longitude: markerCoords.longitude,
+      }, { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 });
+
+      Alert.alert('✅ Location Saved', 'Team location and coverage area updated.', [
+        { text: 'OK', onPress: () => router.replace('/security/home') },
       ]);
     } catch (error: any) {
-      console.error('[SetLocation] Save location error:', error?.response?.data);
-      let errorMsg = 'Failed to save location. Please try again.';
-      if (error?.response?.status === 401) {
-        Alert.alert('Session Expired', 'Please login again');
-        await clearAuthData();
-        router.replace('/auth/login');
-        return;
-      }
-      if (error.response?.data?.detail) {
-        errorMsg = error.response.data.detail;
-      } else if (error.request) {
-        errorMsg = 'Network error. Please check your connection.';
-      }
-      Alert.alert('Error', errorMsg);
+      if (error?.response?.status === 401) { await clearAuthData(); router.replace('/auth/login'); return; }
+      Alert.alert('Error', error?.response?.data?.detail || 'Failed to save location.');
     } finally {
       setLoading(false);
     }
   };
 
+  const sourceLabel = locationSource === 'gps' ? '📍 Live GPS' : locationSource === 'saved' ? '💾 Last Saved' : '🌐 Default';
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.replace("/security/home")} style={styles.backButton}>
+        <TouchableOpacity onPress={() => router.replace('/security/home')} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Set Team Location</Text>
         <View style={styles.placeholder} />
       </View>
 
+      <View style={styles.sourceBadge}>
+        <Text style={styles.sourceText}>{sourceLabel}</Text>
+        <TouchableOpacity style={styles.refreshLocationBtn} onPress={handleRefreshLocation} disabled={locating}>
+          {locating ? <ActivityIndicator size="small" color="#3B82F6" /> : (
+            <>
+              <Ionicons name="locate" size={16} color="#3B82F6" />
+              <Text style={styles.refreshLocationText}>Use My Location</Text>
+            </>
+          )}
+        </TouchableOpacity>
+      </View>
+
       <NativeMap
         region={region}
         markerCoords={markerCoords}
         radiusKm={radiusKm}
-        onPress={(coords) => setMarkerCoords(coords)}
+        onPress={(coords) => { setMarkerCoords(coords); setLocationSource('gps'); }}
         onMarkerChange={(coords) => setMarkerCoords(coords)}
       />
 
       <View style={styles.controls}>
         <View style={styles.coordinatesDisplay}>
-          <Text style={styles.coordLabel}>Lat: {markerCoords.latitude.toFixed(4)}</Text>
-          <Text style={styles.coordLabel}>Lng: {markerCoords.longitude.toFixed(4)}</Text>
+          <Text style={styles.coordLabel}>Lat: {markerCoords.latitude.toFixed(5)}</Text>
+          <Text style={styles.coordLabel}>Lng: {markerCoords.longitude.toFixed(5)}</Text>
         </View>
-        
+
         <View style={styles.radiusControl}>
-          <Text style={styles.radiusLabel}>Search Radius: {radiusKm}km</Text>
+          <Text style={styles.radiusLabel}>Coverage Radius: {radiusKm} km</Text>
           <Slider
-            style={styles.slider}
-            minimumValue={1}
-            maximumValue={50}
-            step={1}
-            value={radiusKm}
-            onValueChange={setRadiusKm}
-            minimumTrackTintColor="#3B82F6"
-            maximumTrackTintColor="#334155"
-            thumbTintColor="#3B82F6"
+            style={styles.slider} minimumValue={1} maximumValue={50} step={1}
+            value={radiusKm} onValueChange={setRadiusKm}
+            minimumTrackTintColor="#3B82F6" maximumTrackTintColor="#334155" thumbTintColor="#3B82F6"
           />
         </View>
 
-        <TouchableOpacity style={styles.saveButton} onPress={saveTeamLocation} disabled={loading}>
-          {loading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
+        <TouchableOpacity style={styles.saveButton} onPress={saveTeamLocation} disabled={loading || locating}>
+          {loading ? <ActivityIndicator color="#fff" /> : (
             <>
               <Ionicons name="save" size={20} color="#fff" />
               <Text style={styles.saveButtonText}>Save Location</Text>
@@ -179,9 +175,7 @@ export default function SetLocation() {
         </TouchableOpacity>
 
         <Text style={styles.helpText}>
-          {Platform.OS === 'web' 
-            ? 'Enter coordinates manually or use the app on mobile for map selection.'
-            : 'Tap on map to set location. Adjust radius to set coverage area.'}
+          Tap "Use My Location" for precise GPS fix. Tap map to adjust manually.
         </Text>
       </View>
     </SafeAreaView>
@@ -194,9 +188,13 @@ const styles = StyleSheet.create({
   backButton: { padding: 4 },
   headerTitle: { fontSize: 20, fontWeight: '600', color: '#fff' },
   placeholder: { width: 32 },
+  sourceBadge: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 8, backgroundColor: '#1E293B', borderBottomWidth: 1, borderBottomColor: '#334155' },
+  sourceText: { fontSize: 13, color: '#94A3B8', fontWeight: '500' },
+  refreshLocationBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#3B82F620', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
+  refreshLocationText: { fontSize: 13, color: '#3B82F6', fontWeight: '600' },
   controls: { backgroundColor: '#1E293B', padding: 20, borderTopLeftRadius: 24, borderTopRightRadius: 24 },
   coordinatesDisplay: { flexDirection: 'row', justifyContent: 'space-around', marginBottom: 16, backgroundColor: '#0F172A', padding: 12, borderRadius: 8 },
-  coordLabel: { fontSize: 14, color: '#94A3B8', fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
+  coordLabel: { fontSize: 13, color: '#94A3B8', fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
   radiusControl: { marginBottom: 20 },
   radiusLabel: { fontSize: 16, fontWeight: '600', color: '#fff', marginBottom: 12 },
   slider: { width: '100%', height: 40 },
