@@ -1,396 +1,248 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  FlatList,
-  ActivityIndicator,
-  RefreshControl,
-  Alert,
-} from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Alert, AppState, BackHandler, Linking, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import * as Location from 'expo-location';
+import * as TaskManager from 'expo-task-manager';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import Constants from 'expo-constants';
-import { Audio } from 'expo-av';
-import { Video, ResizeMode } from 'expo-av';
+import EmergencyCategoryModal from '../../components/EmergencyCategoryModal';
 import { getAuthToken, clearAuthData } from '../../utils/auth';
 
 const BACKEND_URL = Constants.expoConfig?.extra?.backendUrl || process.env.EXPO_PUBLIC_BACKEND_URL || 'https://ongoing-dev-22.preview.emergentagent.com';
+const LOCATION_TASK = 'background-location-panic';
 
-export default function ReportList() {
-  const router = useRouter();
-  const [reports, setReports] = useState<any[]>([]);
-  const [pendingReports, setPendingReports] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [retrying, setRetrying] = useState<string | null>(null);
-  
-  // Audio player state
-  const [currentSound, setCurrentSound] = useState<Audio.Sound | null>(null);
-  const [playingId, setPlayingId] = useState<string | null>(null);
-  const [isPaused, setIsPaused] = useState(false);
-  const [playbackPosition, setPlaybackPosition] = useState(0);
-  
-  // Video player state
-  const [selectedVideo, setSelectedVideo] = useState<string | null>(null);
-  const [videoLoading, setVideoLoading] = useState(true);
-  const [videoError, setVideoError] = useState(false);
-  const [authToken, setAuthToken] = useState<string | null>(null);
-
-  useFocusEffect(
-    useCallback(() => {
-      loadReports();
-      loadPendingReports();
-      // Load token for video playback headers
-      getAuthToken().then(t => setAuthToken(t));
-      return () => {
-        if (currentSound) {
-          currentSound.unloadAsync();
-        }
-      };
-    }, [])
-  );
-
-  const loadReports = async () => {
+// Background task
+TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
+  if (error) { console.error('[PanicActive] BG location error:', error); return; }
+  if (data) {
+    const { locations } = data as any;
+    const location = locations[0];
     try {
-      const token = await getAuthToken();
-      if (!token) {
-        router.replace('/auth/login');
+      const token = await AsyncStorage.getItem('auth_token');
+      if (token) {
+        await axios.post(`${BACKEND_URL}/api/panic/location`, {
+          latitude: location.coords.latitude, longitude: location.coords.longitude,
+          accuracy: location.coords.accuracy, timestamp: new Date().toISOString()
+        }, { headers: { Authorization: `Bearer ${token}` }, timeout: 15000 });
+      }
+    } catch {}
+  }
+});
+
+const EMERGENCY_SERVICES: Record<string, { name: string; number: string }[]> = {
+  ambulance: [{ name: 'National Emergency', number: '112' }, { name: 'Ambulance Service', number: '911' }],
+  fire: [{ name: 'Fire Service', number: '101' }, { name: 'Emergency', number: '112' }],
+};
+const SECURITY_EMERGENCIES = ['violence', 'robbery', 'kidnapping', 'breakin', 'burglary', 'harassment', 'other'];
+
+export default function PanicActive() {
+  const router = useRouter();
+  const [isTracking, setIsTracking] = useState(false);
+  const [panicId, setPanicId] = useState<string | null>(null);
+  const [showCategoryModal, setShowCategoryModal] = useState(true);
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [showSafeButton, setShowSafeButton] = useState(false);
+  const [showEmergencyContacts, setShowEmergencyContacts] = useState<'ambulance' | 'fire' | null>(null);
+  const intervalRef = useRef<any>(null);
+
+  useEffect(() => {
+    checkActivePanic();
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    return () => { subscription.remove(); if (intervalRef.current) clearInterval(intervalRef.current); };
+  }, []);
+
+  const checkActivePanic = async () => {
+    try {
+      const activePanic = await AsyncStorage.getItem('active_panic');
+      if (activePanic) {
+        const panicData = JSON.parse(activePanic);
+        setPanicId(panicData.id);
+        setSelectedCategory(panicData.category);
+        setIsTracking(true);
+        setShowSafeButton(true);
+        setShowCategoryModal(false);
+        const token = await getAuthToken();
+        if (token) startLocationTracking(token);
+      }
+    } catch {}
+  };
+
+  const handleAppStateChange = (nextAppState: string) => {
+    if (nextAppState === 'active' && isTracking) setShowSafeButton(true);
+  };
+
+  const handleCategorySelect = async (category: string) => {
+    setSelectedCategory(category);
+    setShowCategoryModal(false);
+    if (category === 'medical') { setShowEmergencyContacts('ambulance'); }
+    else if (category === 'fire') { setShowEmergencyContacts('fire'); }
+    else if (SECURITY_EMERGENCIES.includes(category)) { await activatePanicMode(category); }
+  };
+
+  const activatePanicMode = async (category: string) => {
+    try {
+      // Request permissions
+      const { status: foregroundStatus } = await Location.requestForegroundPermissionsAsync();
+      if (foregroundStatus !== 'granted') {
+        Alert.alert('Permission Denied', 'Location permission required for panic mode.');
+        router.back();
         return;
       }
-      
-      const response = await axios.get(`${BACKEND_URL}/api/report/my-reports?t=${Date.now()}`, {
-        headers: { Authorization: `Bearer ${token}`, 'Cache-Control': 'no-cache' },
-        timeout: 15000
+      await Location.requestBackgroundPermissionsAsync();
+
+      // Get FRESH high-accuracy GPS location
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.BestForNavigation,
       });
-      setReports(response.data || []);
+
+      const token = await getAuthToken();
+      if (!token) { Alert.alert('Session Expired', 'Please login again'); router.replace('/auth/login'); return; }
+
+      const response = await axios.post(`${BACKEND_URL}/api/panic/activate`, {
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+        accuracy: location.coords.accuracy,
+        timestamp: new Date().toISOString(),
+        emergency_category: category,
+      }, { headers: { Authorization: `Bearer ${token}` }, timeout: 15000 });
+
+      const newPanicId = response.data.panic_id;
+      setPanicId(newPanicId);
+      setIsTracking(true);
+
+      await AsyncStorage.setItem('active_panic', JSON.stringify({
+        id: newPanicId, category, activated_at: new Date().toISOString()
+      }));
+      await AsyncStorage.setItem('auth_token', token);
+
+      startLocationTracking(token);
+
+      // Close the app (Android: exit; iOS: minimize — no programmatic close on iOS)
+      if (Platform.OS === 'android') {
+        BackHandler.exitApp();
+      } else {
+        // iOS — go to home screen via router, app minimizes naturally
+        router.replace('/auth/login');
+      }
     } catch (error: any) {
-      console.error('[ReportList] Failed to load reports:', error?.response?.status);
       if (error?.response?.status === 401) {
         await clearAuthData();
         router.replace('/auth/login');
+      } else {
+        Alert.alert('Error', 'Failed to activate panic mode. Please try again.');
+        router.back();
       }
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
     }
   };
 
-  const loadPendingReports = async () => {
+  const startLocationTracking = async (token: string) => {
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    intervalRef.current = setInterval(async () => {
+      try {
+        const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+        await axios.post(`${BACKEND_URL}/api/panic/location`, {
+          latitude: location.coords.latitude, longitude: location.coords.longitude,
+          accuracy: location.coords.accuracy, timestamp: new Date().toISOString()
+        }, { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 });
+      } catch {}
+    }, 30000);
+
     try {
-      const pending = JSON.parse(await AsyncStorage.getItem('pending_video_reports') || '[]');
-      setPendingReports(pending);
-    } catch (error) {
-      console.error('[ReportList] Failed to load pending reports:', error);
-    }
-  };
-
-  const onRefresh = () => {
-    setRefreshing(true);
-    loadReports();
-    loadPendingReports();
-  };
-
-  const retryUpload = async (pendingReport: any) => {
-    setRetrying(pendingReport.id);
-    try {
-      const token = await getAuthToken();
-      if (!token) {
-        router.replace('/auth/login');
-        return;
-      }
-
-      // Read the video file
-      const FileSystem = require('expo-file-system');
-      const fileInfo = await FileSystem.getInfoAsync(pendingReport.uri);
-      
-      if (!fileInfo.exists) {
-        Alert.alert('Error', 'Video file no longer exists. Please record again.');
-        removePendingReport(pendingReport.id);
-        return;
-      }
-
-      const base64Video = await FileSystem.readAsStringAsync(pendingReport.uri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-
-      await axios.post(
-        `${BACKEND_URL}/api/report/upload-video`,
-        {
-          video_data: base64Video,
-          caption: pendingReport.caption,
-          is_anonymous: pendingReport.is_anonymous,
-          latitude: pendingReport.latitude,
-          longitude: pendingReport.longitude,
-          duration_seconds: pendingReport.duration_seconds
+      await Location.startLocationUpdatesAsync(LOCATION_TASK, {
+        accuracy: Location.Accuracy.High, timeInterval: 30000, distanceInterval: 0,
+        foregroundService: {
+          notificationTitle: '🚨 SafeGuard Panic Active',
+          notificationBody: 'Your location is being shared with security. Tap to open app.',
         },
-        { 
-          headers: { Authorization: `Bearer ${token}` },
-          timeout: 120000
-        }
-      );
-
-      Alert.alert('Success', 'Report uploaded successfully!');
-      removePendingReport(pendingReport.id);
-      loadReports();
-    } catch (error: any) {
-      Alert.alert('Upload Failed', error?.response?.data?.detail || 'Please try again later.');
-    } finally {
-      setRetrying(null);
-    }
-  };
-
-  const removePendingReport = async (id: string) => {
-    const updated = pendingReports.filter(r => r.id !== id);
-    setPendingReports(updated);
-    await AsyncStorage.setItem('pending_video_reports', JSON.stringify(updated));
-  };
-
-  // Audio playback functions
-  const playAudio = async (audioUrl: string, reportId: string) => {
-    try {
-      if (playingId === reportId && currentSound) {
-        if (isPaused) {
-          await currentSound.playFromPositionAsync(playbackPosition);
-          setIsPaused(false);
-        } else {
-          const status = await currentSound.getStatusAsync();
-          if (status.isLoaded) {
-            setPlaybackPosition(status.positionMillis);
-          }
-          await currentSound.pauseAsync();
-          setIsPaused(true);
-        }
-        return;
-      }
-
-      if (currentSound) {
-        await currentSound.stopAsync();
-        await currentSound.unloadAsync();
-        setCurrentSound(null);
-        setPlayingId(null);
-        setIsPaused(false);
-        setPlaybackPosition(0);
-      }
-
-      await Audio.setAudioModeAsync({
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: false,
       });
-
-      const { sound: newSound } = await Audio.Sound.createAsync(
-        { uri: audioUrl },
-        { shouldPlay: true }
-      );
-
-      setCurrentSound(newSound);
-      setPlayingId(reportId);
-      setIsPaused(false);
-      setPlaybackPosition(0);
-
-      newSound.setOnPlaybackStatusUpdate((status: any) => {
-        if (status.isLoaded && status.didJustFinish) {
-          setPlayingId(null);
-          setIsPaused(false);
-          setPlaybackPosition(0);
-          newSound.unloadAsync();
-          setCurrentSound(null);
-        }
-      });
-    } catch (error: any) {
-      Alert.alert('Playback Error', 'Unable to play audio: ' + error.message);
-    }
+    } catch {}
   };
 
-  const stopAudio = async () => {
-    if (currentSound) {
-      await currentSound.stopAsync();
-      await currentSound.unloadAsync();
-      setCurrentSound(null);
-      setPlayingId(null);
-      setIsPaused(false);
-      setPlaybackPosition(0);
-    }
-  };
+  const markSafe = async () => {
+    Alert.alert("I'm Safe Now", 'This will stop tracking and notify security you are safe.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: "Yes, I'm Safe",
+        onPress: async () => {
+          try {
+            const token = await getAuthToken();
+            if (intervalRef.current) clearInterval(intervalRef.current);
+            try { await Location.stopLocationUpdatesAsync(LOCATION_TASK); } catch {}
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
-
-  const renderPendingReport = ({ item }: any) => (
-    <View style={styles.pendingCard}>
-      <View style={styles.pendingHeader}>
-        <View style={styles.pendingIcon}>
-          <Ionicons name="cloud-offline" size={24} color="#F59E0B" />
-        </View>
-        <View style={styles.pendingInfo}>
-          <Text style={styles.pendingTitle}>Pending Upload</Text>
-          <Text style={styles.pendingDate}>{formatDate(item.created_at)}</Text>
-          <Text style={styles.pendingDuration}>Duration: {Math.floor(item.duration_seconds / 60)}:{(item.duration_seconds % 60).toString().padStart(2, '0')}</Text>
-        </View>
-      </View>
-      
-      <View style={styles.pendingActions}>
-        <TouchableOpacity 
-          style={styles.retryButton}
-          onPress={() => retryUpload(item)}
-          disabled={retrying === item.id}
-        >
-          {retrying === item.id ? (
-            <ActivityIndicator color="#fff" size="small" />
-          ) : (
-            <>
-              <Ionicons name="refresh" size={18} color="#fff" />
-              <Text style={styles.retryButtonText}>Retry Upload</Text>
-            </>
-          )}
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={styles.deleteButton}
-          onPress={() => {
-            Alert.alert('Delete?', 'This will permanently delete this report.', [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Delete', style: 'destructive', onPress: () => removePendingReport(item.id) }
+            if (token) {
+              await axios.post(`${BACKEND_URL}/api/panic/deactivate`, {}, {
+                headers: { Authorization: `Bearer ${token}` }, timeout: 15000
+              });
+            }
+            await AsyncStorage.removeItem('active_panic');
+            setIsTracking(false);
+            setShowSafeButton(false);
+            Alert.alert('✅ You are Safe', 'Panic mode deactivated. Security has been notified.', [
+              { text: 'OK', onPress: () => router.replace('/civil/home') }
             ]);
-          }}
-        >
-          <Ionicons name="trash" size={18} color="#EF4444" />
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
-
-  const renderReport = ({ item }: any) => {
-    const reportId = item._id || item.id;
-    const isPlaying = playingId === reportId;
-    const isAudio = item.type === 'audio';
-    const isVideo = item.type === 'video';
-    
-    return (
-      <View style={styles.reportCard}>
-        <View style={styles.reportHeader}>
-          <View style={[styles.reportIcon, { backgroundColor: isVideo ? '#10B98120' : '#8B5CF620' }]}>
-            <Ionicons
-              name={isVideo ? 'videocam' : 'mic'}
-              size={28}
-              color={isVideo ? '#10B981' : '#8B5CF6'}
-            />
-          </View>
-          <View style={styles.reportInfo}>
-            <Text style={styles.reportType}>{item.type?.toUpperCase()} REPORT</Text>
-            <Text style={styles.reportDate}>{formatDate(item.created_at)}</Text>
-            {item.caption && (
-              <Text style={styles.reportCaption} numberOfLines={2}>{item.caption}</Text>
-            )}
-          </View>
-          <View style={[styles.statusBadge, item.uploaded ? styles.uploadedBadge : styles.pendingBadge]}>
-            <Text style={[styles.statusText, item.uploaded ? styles.uploadedText : styles.pendingText]}>
-              {item.uploaded ? 'Uploaded' : 'Pending'}
-            </Text>
-          </View>
-        </View>
-
-        {/* Playback Controls */}
-        {item.file_url && (
-          <View style={styles.playbackControls}>
-            {isAudio && (
-              <>
-                <TouchableOpacity
-                  style={[styles.playButton, isPlaying && !isPaused && styles.playButtonActive]}
-                  onPress={() => playAudio(item.file_url, reportId)}
-                >
-                  <Ionicons
-                    name={isPlaying ? (isPaused ? 'play' : 'pause') : 'play'}
-                    size={24}
-                    color={isPlaying && !isPaused ? '#fff' : '#8B5CF6'}
-                  />
-                  <Text style={[styles.playButtonText, isPlaying && !isPaused && styles.playButtonTextActive]}>
-                    {isPlaying ? (isPaused ? 'Resume' : 'Pause') : 'Play Audio'}
-                  </Text>
-                </TouchableOpacity>
-                
-                {isPlaying && (
-                  <TouchableOpacity style={styles.stopButton} onPress={stopAudio}>
-                    <Ionicons name="stop" size={20} color="#EF4444" />
-                  </TouchableOpacity>
-                )}
-              </>
-            )}
-
-            {isVideo && (
-              <TouchableOpacity
-                style={styles.playButton}
-                onPress={() => { setVideoError(false); setVideoLoading(true); setSelectedVideo(item.file_url); }}
-              >
-                <Ionicons name="play-circle" size={24} color="#10B981" />
-                <Text style={styles.playButtonText}>Watch Video</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        )}
-      </View>
-    );
+          } catch {
+            Alert.alert('Error', 'Failed to deactivate panic mode. Please try again.');
+          }
+        }
+      }
+    ]);
   };
 
-  // Video player modal
-  if (selectedVideo) {
+  const callEmergency = (number: string) => Linking.openURL(`tel:${number}`);
+
+  if (showEmergencyContacts) {
+    const services = EMERGENCY_SERVICES[showEmergencyContacts];
+    const title = showEmergencyContacts === 'ambulance' ? 'Ambulance Services' : 'Fire Services';
+    const icon = showEmergencyContacts === 'ambulance' ? 'medkit' : 'flame';
+    const color = showEmergencyContacts === 'ambulance' ? '#10B981' : '#F59E0B';
     return (
-      <SafeAreaView style={[styles.container, { backgroundColor: '#000' }]}>
-        <View style={styles.videoHeader}>
-          <TouchableOpacity onPress={() => setSelectedVideo(null)}>
-            <Ionicons name="close" size={28} color="#fff" />
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => { setShowEmergencyContacts(null); setShowCategoryModal(true); }}>
+            <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
-          <Text style={styles.videoTitle}>Video Report</Text>
-          <View style={{ width: 28 }} />
+          <Text style={styles.headerTitle}>{title}</Text>
+          <View style={{ width: 24 }} />
         </View>
-        <View style={styles.videoContainer}>
-          {videoLoading && !videoError && (
-            <View style={styles.videoLoadingOverlay}>
-              <ActivityIndicator size="large" color="#3B82F6" />
-              <Text style={styles.videoLoadingText}>Loading video...</Text>
-            </View>
-          )}
-          {videoError ? (
-            <View style={styles.videoErrorContainer}>
-              <Ionicons name="cloud-offline-outline" size={60} color="#64748B" />
-              <Text style={styles.videoErrorTitle}>Video Unavailable</Text>
-              <Text style={styles.videoErrorText}>This video could not be played. It may still be processing — please try again in a moment.</Text>
-              <TouchableOpacity style={styles.videoRetryBtn} onPress={() => { setVideoError(false); setVideoLoading(true); }}>
-                <Ionicons name="refresh" size={18} color="#fff" />
-                <Text style={styles.videoRetryText}>Retry</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <Video
-              source={{ 
-                uri: selectedVideo.startsWith('http') ? selectedVideo : `${BACKEND_URL}${selectedVideo}`,
-              }}
-              style={styles.video}
-              useNativeControls
-              resizeMode={ResizeMode.CONTAIN}
-              shouldPlay
-              isLooping={false}
-              onReadyForDisplay={() => setVideoLoading(false)}
-              onLoad={() => setVideoLoading(false)}
-              onError={(err) => { 
-                console.error('[VideoPlayer] Error:', err);
-                setVideoLoading(false); 
-                setVideoError(true); 
-              }}
-            />
-          )}
+        <View style={styles.emergencyContent}>
+          <View style={[styles.emergencyIcon, { backgroundColor: `${color}20` }]}>
+            <Ionicons name={icon as any} size={60} color={color} />
+          </View>
+          <Text style={styles.emergencyTitle}>{title}</Text>
+          <Text style={styles.emergencyDescription}>Tap to call emergency services immediately</Text>
+          {services.map((service, i) => (
+            <TouchableOpacity key={i} style={[styles.callButton, { backgroundColor: color }]} onPress={() => callEmergency(service.number)}>
+              <Ionicons name="call" size={24} color="#fff" />
+              <View style={styles.callInfo}>
+                <Text style={styles.callName}>{service.name}</Text>
+                <Text style={styles.callNumber}>{service.number}</Text>
+              </View>
+            </TouchableOpacity>
+          ))}
+          <TouchableOpacity style={styles.backHomeButton} onPress={() => router.replace('/civil/home')}>
+            <Text style={styles.backHomeText}>Back to Home</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (showSafeButton && isTracking) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.trackingContent}>
+          <View style={styles.trackingIcon}><Ionicons name="radio" size={80} color="#EF4444" /></View>
+          <Text style={styles.trackingTitle}>🚨 Panic Mode Active</Text>
+          <Text style={styles.trackingSubtitle}>Your location is being tracked and shared with nearby security.</Text>
+          <Text style={styles.trackingCategory}>Emergency: {selectedCategory?.toUpperCase()}</Text>
+          <TouchableOpacity style={styles.safeButton} onPress={markSafe}>
+            <Ionicons name="shield-checkmark" size={28} color="#fff" />
+            <Text style={styles.safeButtonText}>I'm Safe Now</Text>
+          </TouchableOpacity>
+          <Text style={styles.safeNote}>Tap above when you are safe to stop tracking and notify security.</Text>
         </View>
       </SafeAreaView>
     );
@@ -398,37 +250,13 @@ export default function ReportList() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#fff" />
-        </TouchableOpacity>
-        <Text style={styles.title}>My Reports ({reports.length + pendingReports.length})</Text>
-        <TouchableOpacity onPress={onRefresh}>
-          <Ionicons name="refresh" size={24} color="#fff" />
-        </TouchableOpacity>
-      </View>
-
-      {loading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#3B82F6" />
+      <EmergencyCategoryModal visible={showCategoryModal} onSelect={handleCategorySelect} onCancel={() => { setShowCategoryModal(false); router.back(); }} />
+      {!showCategoryModal && (
+        <View style={styles.activatingContent}>
+          <View style={styles.loadingIcon}><Ionicons name="sync" size={60} color="#EF4444" /></View>
+          <Text style={styles.activatingText}>Activating Panic Mode...</Text>
+          <Text style={styles.activatingSubtext}>Getting precise location & notifying security</Text>
         </View>
-      ) : (
-        <FlatList
-          data={[...pendingReports.map(r => ({ ...r, isPending: true })), ...reports]}
-          renderItem={({ item }) => item.isPending ? renderPendingReport({ item }) : renderReport({ item })}
-          keyExtractor={(item) => item._id || item.id}
-          contentContainerStyle={styles.listContent}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#3B82F6" />
-          }
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Ionicons name="document-text-outline" size={80} color="#64748B" />
-              <Text style={styles.emptyText}>No reports yet</Text>
-              <Text style={styles.emptySubtext}>Your submitted reports will appear here</Text>
-            </View>
-          }
-        />
       )}
     </SafeAreaView>
   );
@@ -436,62 +264,28 @@ export default function ReportList() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0F172A' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1, borderBottomColor: '#1E293B' },
-  title: { fontSize: 18, fontWeight: 'bold', color: '#fff' },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  listContent: { padding: 16 },
-  
-  // Pending report styles
-  pendingCard: { backgroundColor: '#1E293B', borderRadius: 16, padding: 16, marginBottom: 12, borderLeftWidth: 4, borderLeftColor: '#F59E0B' },
-  pendingHeader: { flexDirection: 'row', alignItems: 'center' },
-  pendingIcon: { width: 48, height: 48, borderRadius: 12, backgroundColor: '#F59E0B20', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  pendingInfo: { flex: 1 },
-  pendingTitle: { fontSize: 16, fontWeight: '600', color: '#F59E0B' },
-  pendingDate: { fontSize: 12, color: '#94A3B8', marginTop: 2 },
-  pendingDuration: { fontSize: 12, color: '#64748B', marginTop: 2 },
-  pendingActions: { flexDirection: 'row', marginTop: 12, gap: 8 },
-  retryButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#10B981', paddingVertical: 10, borderRadius: 8 },
-  retryButtonText: { color: '#fff', fontWeight: '600' },
-  deleteButton: { width: 44, height: 44, justifyContent: 'center', alignItems: 'center', backgroundColor: '#EF444420', borderRadius: 8 },
-  
-  // Report card styles
-  reportCard: { backgroundColor: '#1E293B', borderRadius: 16, padding: 16, marginBottom: 12 },
-  reportHeader: { flexDirection: 'row', alignItems: 'flex-start' },
-  reportIcon: { width: 50, height: 50, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  reportInfo: { flex: 1 },
-  reportType: { fontSize: 14, fontWeight: '700', color: '#fff', marginBottom: 2 },
-  reportDate: { fontSize: 12, color: '#64748B', marginBottom: 4 },
-  reportCaption: { fontSize: 13, color: '#94A3B8', fontStyle: 'italic' },
-  statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
-  uploadedBadge: { backgroundColor: '#10B98120' },
-  pendingBadge: { backgroundColor: '#F59E0B20' },
-  statusText: { fontSize: 12, fontWeight: '600' },
-  uploadedText: { color: '#10B981' },
-  pendingText: { color: '#F59E0B' },
-  
-  // Playback controls
-  playbackControls: { flexDirection: 'row', marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#334155', gap: 8 },
-  playButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 10, backgroundColor: '#0F172A', borderRadius: 8 },
-  playButtonActive: { backgroundColor: '#8B5CF6' },
-  playButtonText: { color: '#94A3B8', fontWeight: '500' },
-  playButtonTextActive: { color: '#fff' },
-  stopButton: { width: 44, height: 44, justifyContent: 'center', alignItems: 'center', backgroundColor: '#EF444420', borderRadius: 8 },
-  
-  // Video player
-  videoHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, backgroundColor: '#000' },
-  videoTitle: { fontSize: 18, fontWeight: 'bold', color: '#fff' },
-  videoContainer: { flex: 1, backgroundColor: '#000', justifyContent: 'center' },
-  video: { width: '100%', height: 300 },
-  videoLoadingOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000', zIndex: 2 },
-  videoLoadingText: { color: '#94A3B8', marginTop: 12, fontSize: 15 },
-  videoErrorContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 },
-  videoErrorTitle: { color: '#fff', fontSize: 20, fontWeight: '600', marginTop: 16 },
-  videoErrorText: { color: '#94A3B8', fontSize: 14, textAlign: 'center', marginTop: 8, lineHeight: 20 },
-  videoRetryBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#3B82F6', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 10, marginTop: 20 },
-  videoRetryText: { color: '#fff', fontWeight: '600' },
-  
-  // Empty state
-  emptyContainer: { alignItems: 'center', paddingVertical: 80 },
-  emptyText: { fontSize: 18, color: '#64748B', marginTop: 16 },
-  emptySubtext: { fontSize: 14, color: '#475569', marginTop: 4 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20 },
+  headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#fff' },
+  trackingContent: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
+  trackingIcon: { width: 140, height: 140, borderRadius: 70, backgroundColor: '#EF444420', justifyContent: 'center', alignItems: 'center', marginBottom: 24 },
+  trackingTitle: { fontSize: 28, fontWeight: 'bold', color: '#EF4444', marginBottom: 12 },
+  trackingSubtitle: { fontSize: 16, color: '#94A3B8', textAlign: 'center', marginBottom: 8, lineHeight: 24 },
+  trackingCategory: { fontSize: 14, color: '#F59E0B', fontWeight: '600', marginBottom: 40 },
+  safeButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, backgroundColor: '#10B981', paddingVertical: 18, paddingHorizontal: 40, borderRadius: 16, marginTop: 20 },
+  safeButtonText: { fontSize: 20, fontWeight: 'bold', color: '#fff' },
+  safeNote: { fontSize: 14, color: '#64748B', marginTop: 16, textAlign: 'center', lineHeight: 20 },
+  emergencyContent: { flex: 1, alignItems: 'center', padding: 20, paddingTop: 40 },
+  emergencyIcon: { width: 120, height: 120, borderRadius: 60, justifyContent: 'center', alignItems: 'center', marginBottom: 24 },
+  emergencyTitle: { fontSize: 28, fontWeight: 'bold', color: '#fff', marginBottom: 12 },
+  emergencyDescription: { fontSize: 16, color: '#94A3B8', textAlign: 'center', marginBottom: 32 },
+  callButton: { flexDirection: 'row', alignItems: 'center', width: '100%', padding: 20, borderRadius: 16, marginBottom: 16 },
+  callInfo: { marginLeft: 16 },
+  callName: { fontSize: 18, fontWeight: '600', color: '#fff' },
+  callNumber: { fontSize: 24, fontWeight: 'bold', color: '#fff' },
+  backHomeButton: { marginTop: 32, paddingVertical: 16, paddingHorizontal: 32 },
+  backHomeText: { fontSize: 16, color: '#64748B' },
+  activatingContent: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
+  loadingIcon: { width: 120, height: 120, borderRadius: 60, backgroundColor: '#EF444420', justifyContent: 'center', alignItems: 'center', marginBottom: 24 },
+  activatingText: { fontSize: 24, fontWeight: 'bold', color: '#EF4444', marginBottom: 8 },
+  activatingSubtext: { fontSize: 16, color: '#94A3B8' },
 });
