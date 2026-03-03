@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput, Alert, ActivityIndicator, FlatList, KeyboardAvoidingView, Platform, Image, Modal } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import * as ImagePicker from 'expo-image-picker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -104,14 +105,62 @@ export default function Settings() {
   };
 
   const pickAndUploadPhoto = async () => {
-    if (!cameraPermission?.granted) {
-      const result = await requestCameraPermission();
-      if (!result.granted) {
-        Alert.alert('Permission Required', 'Camera permission is needed to take your profile photo');
-        return;
-      }
+    Alert.alert('Update Profile Photo', 'Choose photo source:', [
+      {
+        text: 'Camera',
+        onPress: async () => {
+          if (!cameraPermission?.granted) {
+            const result = await requestCameraPermission();
+            if (!result.granted) {
+              Alert.alert('Permission Required', 'Camera permission is needed.');
+              return;
+            }
+          }
+          setShowCamera(true);
+        }
+      },
+      {
+        text: 'Photo Library',
+        onPress: async () => {
+          const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+          if (status !== 'granted') {
+            Alert.alert('Permission Required', 'Photo library access is needed to pick a photo.');
+            return;
+          }
+          const result = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            allowsEditing: true,
+            aspect: [1, 1],
+            quality: 0.7,
+            base64: true,
+          });
+          if (!result.canceled && result.assets[0]?.base64) {
+            await uploadBase64Photo(result.assets[0].base64);
+          }
+        }
+      },
+      { text: 'Cancel', style: 'cancel' }
+    ]);
+  };
+
+  const uploadBase64Photo = async (base64Data: string) => {
+    setUploadingPhoto(true);
+    try {
+      const token = await getAuthToken();
+      if (!token) { router.replace('/auth/login'); return; }
+      const response = await axios.put(`${BACKEND_URL}/api/user/profile-photo`, {
+        photo_data: base64Data,
+        mime_type: 'image/jpeg',
+      }, { headers: { Authorization: `Bearer ${token}` }, timeout: 30000 });
+      const photoUrl = response.data.photo_url;
+      setProfilePhoto(photoUrl.startsWith('http') ? photoUrl : `${BACKEND_URL}${photoUrl}`);
+      Alert.alert('✅ Success', 'Profile photo updated! Security agents can now identify you.');
+    } catch (error: any) {
+      const msg = error?.response?.data?.detail || 'Failed to upload photo. Please try again.';
+      Alert.alert('Upload Failed', msg);
+    } finally {
+      setUploadingPhoto(false);
     }
-    setShowCamera(true);
   };
 
   const captureAndUpload = async () => {
@@ -119,31 +168,14 @@ export default function Settings() {
       Alert.alert('Error', 'Camera not ready. Please try again.');
       return;
     }
-    setUploadingPhoto(true);
     try {
-      // Take the photo FIRST while camera is still mounted
       const photo = await cameraRef.current.takePictureAsync({ base64: true, quality: 0.7 });
-      // Close camera AFTER photo is captured
       setShowCamera(false);
-
       if (!photo?.base64) { Alert.alert('Error', 'Could not read photo data'); return; }
-
-      const token = await getAuthToken();
-      if (!token) { router.replace('/auth/login'); return; }
-
-      const response = await axios.put(`${BACKEND_URL}/api/user/profile-photo`, {
-        photo_data: photo.base64,
-        mime_type: 'image/jpeg',
-      }, { headers: { Authorization: `Bearer ${token}` }, timeout: 30000 });
-
-      setProfilePhoto(response.data.photo_url.startsWith('http') ? response.data.photo_url : `${BACKEND_URL}${response.data.photo_url}`);
-      Alert.alert('Success', 'Profile photo updated! Security agents can now identify you.');
+      await uploadBase64Photo(photo.base64);
     } catch (error: any) {
-      console.error('[Settings] Photo upload error:', error?.response?.data || error?.message);
-      const msg = error?.response?.data?.detail || 'Failed to upload photo. Please try again.';
-      Alert.alert('Upload Failed', msg);
-    } finally {
-      setUploadingPhoto(false);
+      setShowCamera(false);
+      Alert.alert('Camera Error', error?.message || 'Failed to take photo. Please try again.');
     }
   };
 
