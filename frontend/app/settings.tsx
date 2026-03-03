@@ -622,5 +622,4 @@ const styles = StyleSheet.create({
   cameraGuideText: { color: 'rgba(255,255,255,0.8)', marginTop: 16, fontSize: 14 },
   cameraBottom: { alignItems: 'center', paddingBottom: 60, backgroundColor: 'rgba(0,0,0,0.4)' },
   captureBtn: { width: 80, height: 80, borderRadius: 40, borderWidth: 4, borderColor: '#fff', justifyContent: 'center', alignItems: 'center' },
-  captureBtnInner: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#fff' },
-});
+  captureBtnInner: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#fff' }
