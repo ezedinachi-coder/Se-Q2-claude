@@ -262,12 +262,3 @@ const styles = StyleSheet.create({
   etaAlertBanner: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#F59E0B20', marginHorizontal: 16, marginTop: 12, padding: 14, borderRadius: 12, borderLeftWidth: 4, borderLeftColor: '#F59E0B' },
   etaAlertText: { fontSize: 14, color: '#F59E0B', fontWeight: '600', flex: 1 },
 });
-
-// Poll every 20s for ETA alerts
-useEffect(() => {
-  const interval = setInterval(async () => {
-    // fetch escort sessions with ETA < now && !alerted
-    // show banner: "User X ETA expired – check status"
-  }, 20000);
-  return () => clearInterval(interval);
-}, []);
