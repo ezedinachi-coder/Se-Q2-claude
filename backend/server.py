@@ -355,7 +355,7 @@ async def get_profile(user = Depends(get_current_user)):
     return {
         'id': str(user['_id']),
         'email': user['email'],
-        'full_name': user.get('full_name', ''),
+        'full_name': (user.get('full_name') or user.get('name') or ''),
         'phone': user.get('phone'),
         'role': user.get('role', 'civil'),
         'is_premium': user.get('is_premium', False),
@@ -932,7 +932,7 @@ async def track_user(user_id: str, user = Depends(get_current_user)):
 
         return {
             'user_id': user_id,
-            'full_name': target_user.get('full_name', ''),
+            'full_name': target_(user.get('full_name') or user.get('name') or ''),
             'email': target_user.get('email', ''),
             'phone': target_user.get('phone', ''),
             'profile_photo_url': target_user.get('profile_photo_url', None),
@@ -963,7 +963,7 @@ async def get_escort_sessions(user = Depends(get_current_user)):
         latest_loc = s.get('locations', [])[-1] if s.get('locations') else None
         result.append({
             'session_id': str(s['_id']),
-            'user_name': user_info.get('full_name') or user_info.get('email', 'Unknown'),
+            'user_name': (user_info.get('full_name') or user_info.get('name') or '').strip() or user_info.get('email', 'Unknown'),
             'user_email': user_info.get('email', ''),
             'user_phone': user_info.get('phone', ''),
             'started_at': s.get('started_at'),
@@ -1024,8 +1024,8 @@ async def get_nearby_panics(user = Depends(get_current_user)):
         
         result.append({
             'id': str(p['_id']),
-            'user_name': (user_info.get('full_name') or '').strip() or user_info.get('email', 'Unknown'),
-            'full_name': (user_info.get('full_name') or '').strip(),
+            'user_name': (user_info.get('full_name') or user_info.get('name') or '').strip() or user_info.get('email', 'Unknown'),
+            'full_name': (user_info.get('full_name') or user_info.get('name') or '').strip(),
             'user_email': user_info.get('email', 'Unknown'),
             'user_phone': user_info.get('phone', ''),
             'activated_at': p.get('activated_at'),
@@ -1343,7 +1343,7 @@ async def admin_login(login_data: AdminLogin):
         'token': token,
         'user_id': str(user['_id']),
         'email': user['email'],
-        'full_name': user.get('full_name', ''),
+        'full_name': (user.get('full_name') or user.get('name') or ''),
         'role': 'admin'
     }
 
@@ -1647,7 +1647,7 @@ async def admin_all_panics(
         result.append({
             'id': str(p['_id']),
             'user_id': p.get('user_id'),
-            'full_name': (user_info.get('full_name') or '').strip() if user_info else 'Unknown',
+            'full_name': (user_info.get('full_name') or user_info.get('name') or '').strip() if user_info else 'Unknown',
             'user_email': user_info.get('email', 'Unknown') if user_info else 'Unknown',
             'user_phone': user_info.get('phone', '') if user_info else '',
             'profile_photo_url': user_info.get('profile_photo_url') if user_info else None,
@@ -1931,7 +1931,7 @@ async def admin_all_reports(
         result.append({
             'id': str(r['_id']),
             'user_id': r.get('user_id'),
-            'full_name': (user_info.get('full_name') or '').strip() if user_info else ('Anonymous' if r.get('is_anonymous') else 'Unknown'),
+            'full_name': (user_info.get('full_name') or user_info.get('name') or '').strip() if user_info else ('Anonymous' if r.get('is_anonymous') else 'Unknown'),
             'user_email': user_info.get('email', '') if user_info else '',
             'user_phone': user_info.get('phone', '') if user_info else '',
             'type': r.get('type'),
@@ -2090,7 +2090,7 @@ async def security_get_profile(user: dict = Depends(get_current_user)):
     return {
         'id': str(user['_id']),
         'email': user.get('email'),
-        'full_name': user.get('full_name', ''),
+        'full_name': (user.get('full_name') or user.get('name') or ''),
         'phone': user.get('phone', ''),
         'security_sub_role': user.get('security_sub_role', 'team_member'),
         'team_name': user.get('team_name', ''),
@@ -2652,7 +2652,7 @@ async def admin_send_message(
 
 # ===== MEDIA FILE SERVING (with video streaming / range request support) =====
 @app.get("/api/media/{folder}/{filename}")
-async def serve_media_file(folder: str, filename: str, request: Request):
+async def serve_media_file(folder: str, filename: str, request: Request, token: Optional[str] = None):
     """Serve uploaded media files with range-request support for video streaming"""
     file_path = ROOT_DIR / 'uploads' / folder / filename
     if not file_path.exists():
@@ -2784,7 +2784,7 @@ async def get_escort_eta_alerts(user = Depends(get_current_user)):
         minutes_overdue = int((now - s['eta_time']).total_seconds() / 60)
         result.append({
             'session_id': str(s['_id']),
-            'user_name': user_info.get('full_name') or user_info.get('email', 'Unknown'),
+            'user_name': (user_info.get('full_name') or user_info.get('name') or '').strip() or user_info.get('email', 'Unknown'),
             'user_email': user_info.get('email', ''),
             'user_phone': user_info.get('phone', ''),
             'started_at': s.get('started_at'),
