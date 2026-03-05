@@ -375,7 +375,11 @@ export default function ReportList() {
           ) : (
             <Video
               source={{ 
-                uri: selectedVideo.startsWith('http') ? selectedVideo : `${BACKEND_URL}${selectedVideo}`,
+                uri: (() => {
+                  const base = selectedVideo.startsWith('http') ? selectedVideo : `${BACKEND_URL}${selectedVideo}`;
+                  return authToken ? `${base}?token=${encodeURIComponent(authToken)}` : base;
+                })(),
+                headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : undefined,
               }}
               style={styles.video}
               useNativeControls
