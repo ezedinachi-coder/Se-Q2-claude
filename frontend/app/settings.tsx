@@ -132,10 +132,12 @@ export default function Settings() {
             allowsEditing: true,
             aspect: [1, 1] as [number, number],
             quality: 0.7,
-            base64: true,
           });
-          if (!result.canceled && result.assets[0]?.base64) {
-            await uploadBase64Photo(result.assets[0].base64);
+          if (!result.canceled && result.assets[0]?.uri) {
+            await uploadPhotoUri(
+              result.assets[0].uri,
+              result.assets[0].mimeType || 'image/jpeg'
+            );
           }
         },
       },
@@ -143,21 +145,39 @@ export default function Settings() {
     ]);
   };
 
-  const uploadBase64Photo = async (base64Data: string) => {
+  const uploadPhotoUri = async (uri: string, mimeType: string = 'image/jpeg') => {
     setUploadingPhoto(true);
     try {
       const token = await getAuthToken();
       if (!token) { router.replace('/auth/login'); return; }
-      const response = await axios.put(`${BACKEND_URL}/api/user/profile-photo`, {
-        photo_data: base64Data,
-        mime_type: 'image/jpeg',
-      }, { headers: { Authorization: `Bearer ${token}` }, timeout: 30000 });
+
+      // Use FormData (multipart binary) — avoids the proxy body-size limit
+      // that causes "Not Found" when sending large base64 JSON payloads
+      const formData = new FormData();
+      formData.append('photo', {
+        uri,
+        type: mimeType,
+        name: 'profile.jpg',
+      } as any);
+
+      const response = await axios.post(
+        `${BACKEND_URL}/api/user/profile-photo`,
+        formData,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'multipart/form-data',
+          },
+          timeout: 30000,
+        }
+      );
       const photoUrl = response.data.photo_url;
       setProfilePhoto(photoUrl.startsWith('http') ? photoUrl : `${BACKEND_URL}${photoUrl}`);
       Alert.alert('Success', 'Profile photo updated! Security agents can now identify you.');
     } catch (error: any) {
-      const msg = error?.response?.data?.detail || 'Failed to upload photo. Please try again.';
-      Alert.alert('Upload Failed', msg);
+      const status = (error as any)?.response?.status;
+      const msg = (error as any)?.response?.data?.detail || (error as any)?.message || 'Failed to upload photo.';
+      Alert.alert('Upload Failed', `${msg}${status ? ' ('+status+')' : ''}`);
     } finally {
       setUploadingPhoto(false);
     }
@@ -169,10 +189,10 @@ export default function Settings() {
       return;
     }
     try {
-      const photo = await cameraRef.current.takePictureAsync({ base64: true, quality: 0.7 });
+      const photo = await cameraRef.current.takePictureAsync({ quality: 0.7 });
       setShowCamera(false);
-      if (!photo?.base64) { Alert.alert('Error', 'Could not read photo data'); return; }
-      await uploadBase64Photo(photo.base64);
+      if (!photo?.uri) { Alert.alert('Error', 'Could not capture photo'); return; }
+      await uploadPhotoUri(photo.uri, 'image/jpeg');
     } catch (error: any) {
       setShowCamera(false);
       Alert.alert('Camera Error', error?.message || 'Failed to take photo. Please try again.');
